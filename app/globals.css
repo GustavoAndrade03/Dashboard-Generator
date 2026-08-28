@@ -1,0 +1,60 @@
+@import "tailwindcss";
+
+/*
+ * Tema único (claro). Não há variante escura de propósito: o PDF é gerado
+ * imprimindo esta mesma página no Chromium, então um tema que muda conforme a
+ * preferência do sistema faria o arquivo divergir do que o usuário viu.
+ * Ver CLAUDE.md, seção 7.3.
+ */
+:root {
+  --surface: #fcfcfb;
+  --page-plane: #f9f9f7;
+  --ink-primary: #0b0b0b;
+  --ink-secondary: #52514e;
+  --ink-muted: #898781;
+  --gridline: #e1e0d9;
+  --baseline: #c3c2b7;
+}
+
+@theme inline {
+  --color-surface: var(--surface);
+  --color-page-plane: var(--page-plane);
+  --color-ink: var(--ink-primary);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--page-plane);
+  color: var(--ink-primary);
+  color-scheme: light;
+}
+
+/*
+ * Impressão. O PDF é gerado pelo próprio navegador (window.print), então o que
+ * o usuário vê na janela de impressão é o arquivo final — e tudo que não é o
+ * dashboard precisa sumir. Os elementos de edição carregam `print:hidden`.
+ */
+@page {
+  size: A4 landscape;
+  margin: 12mm;
+}
+
+@media print {
+  html,
+  body {
+    background: #ffffff;
+  }
+
+  /*
+   * O Chrome desliga cores de fundo na impressão por padrão. Sem isto, os
+   * cartões saem sem fundo e as fatias da pizza saem em branco — o usuário
+   * veria um dashboard diferente do que está na tela.
+   */
+  *,
+  *::before,
+  *::after {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

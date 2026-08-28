@@ -1,0 +1,80 @@
+// Schema do banco (Postgres / Neon free tier).
+//
+// Decisão de modelagem: a origem dos dados é representada de forma genérica
+// (`DataSourceRecord`), sem assumir que veio de um arquivo. `kind` + `config`
+// descrevem qualquer origem — hoje "xlsx-upload", amanhã "google-sheets" —
+// sem alterar o modelo (CLAUDE.md, seção 5).
+//
+// Os dados normalizados ficam em colunas Json. Para a escala do projeto
+// (<=10 usuários, planilhas de milhares de linhas) isso evita depender de
+// storage de arquivos, que nenhum free tier oferece de forma confiável.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Usuários são cadastrados manualmente: não há fluxo público de registro.
+model User {
+  id           String              @id @default(cuid())
+  email        String              @unique
+  name         String?
+  passwordHash String
+  createdAt    DateTime            @default(now())
+  dataSources  DataSourceRecord[]
+  dashboards   Dashboard[]
+
+  @@map("users")
+}
+
+model DataSourceRecord {
+  id    String @id @default(cuid())
+  /// Discriminador da implementação de DataSource ("xlsx-upload", ...).
+  kind  String
+  label String
+
+  /// Parâmetros da origem: nome do arquivo, id da planilha remota, etc.
+  config Json
+
+  /// TableSchema[] produzido pela Camada 1, já com correções do usuário.
+  schemaJson Json
+
+  /// Linhas normalizadas. Materializadas porque um upload não pode ser relido.
+  payloadJson Json
+
+  /// true quando a origem pode ser reconsultada (Google Sheets, no futuro).
+  refreshable  Boolean  @default(false)
+  lastLoadedAt DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  userId     String
+  user       User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dashboards Dashboard[]
+
+  @@index([userId])
+  @@map("data_sources")
+}
+
+model Dashboard {
+  id    String @id @default(cuid())
+  title String
+
+  /// DashboardConfig: lista de ChartSpec com a customização do usuário.
+  config Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  dataSourceId String
+  dataSource   DataSourceRecord @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("dashboards")
+}
