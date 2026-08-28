@@ -63,6 +63,8 @@ export interface ChartSpec {
 
 /** Posição na grade, em unidades de coluna/linha (não em pixels). */
 export interface ChartLayout {
+  /** Folha em que o gráfico está, a partir de 0. Cada folha é uma página do PDF. */
+  page: number;
   x: number;
   y: number;
   w: number;

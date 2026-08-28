@@ -25,8 +25,12 @@ import { DEFAULT_PALETTE_ID, getPalette, type PaletteId } from "@/lib/dashboard/
 import {
   DEFAULT_TEMPLATE_ID,
   applyTemplate,
+  chartsOnPage,
   findFreeSlot,
+  findSlotOnPage,
   getTemplate,
+  normalizePages,
+  pageCount,
 } from "@/lib/dashboard/templates";
 import type { ChartSpec, DashboardPayload, PlacedChart } from "@/lib/dashboard/types";
 import { useHistory } from "@/lib/dashboard/use-history";
@@ -98,7 +102,7 @@ export function Workspace() {
       }
 
       const template = getTemplate(DEFAULT_TEMPLATE_ID);
-      const { placed } = applyTemplate(template, data.charts);
+      const placed = applyTemplate(template, data.charts);
 
       setSuggestions(data.charts);
       setSelectedId(null);
@@ -131,28 +135,54 @@ export function Workspace() {
 
   const selected = charts.find((chart) => chart.id === selectedId) ?? null;
 
+  /**
+   * Todo commit de layout renumera as folhas: uma folha que ficou sem nenhum
+   * gráfico deixa de existir, senão o PDF sairia com uma página em branco.
+   */
   function commitCharts(next: PlacedChart[]) {
     if (!payload) return;
-    history.commit({ ...payload, config: { ...payload.config, charts: next } });
+    history.commit({
+      ...payload,
+      config: { ...payload.config, charts: normalizePages(next) },
+    });
   }
 
   function addChart(spec: ChartSpec) {
     if (!payload) return;
     const kind = spec.type === "kpi" ? "small" : "large";
+    // Nunca falha: se todas as folhas estiverem cheias, abre a próxima.
     const layout = findFreeSlot(charts, template, kind);
-    if (!layout) {
-      setError("A folha está cheia. Remova ou diminua um gráfico para abrir espaço.");
-      return;
-    }
     setError(null);
     commitCharts([...charts, { ...spec, layout }]);
     setSelectedId(spec.id);
   }
 
-  const hasRoom = findFreeSlot(charts, template, "large") !== null;
+  const totalPaginas = pageCount(charts);
+
+  function moveToPage(chart: PlacedChart, page: number) {
+    if (chart.layout.page === page) return;
+
+    const destino = chartsOnPage(charts, page).filter((item) => item.id !== chart.id);
+    const vaga = findSlotOnPage(destino, chart.layout.w, chart.layout.h);
+    if (!vaga) {
+      setError(
+        `A página ${page + 1} não tem espaço para este gráfico. Diminua algo lá ou escolha "Nova página".`,
+      );
+      return;
+    }
+
+    setError(null);
+    commitCharts(
+      charts.map((item) =>
+        item.id === chart.id
+          ? { ...item, layout: { ...item.layout, page, x: vaga.x, y: vaga.y } }
+          : item,
+      ),
+    );
+  }
 
   return (
-    <main className="mx-auto flex w-full max-w-[1420px] flex-col gap-6 p-6 print:max-w-none print:gap-0 print:p-0">
+    <main className="mx-auto flex w-full max-w-[1420px] flex-col gap-6 p-6 print:block print:max-w-none print:gap-0 print:p-0">
       <header className="print:hidden">
         <h1 className="text-2xl font-semibold text-[#0b0b0b]">Planilha em dashboard</h1>
         <p className="mt-1 text-sm text-[#52514e]">
@@ -182,14 +212,14 @@ export function Workspace() {
           <EditorToolbar
             templateId={payload.config.templateId}
             paletteId={payload.config.paletteId}
-            chartCount={charts.length}
+            pageCount={totalPaginas}
             canUndo={history.canUndo}
             canRedo={history.canRedo}
             onUndo={history.undo}
             onRedo={history.redo}
             onTemplateChange={(id) => {
               const proximo = getTemplate(id);
-              const { placed } = applyTemplate(proximo, charts);
+              const placed = applyTemplate(proximo, charts);
               history.commit({
                 ...payload,
                 config: { ...payload.config, templateId: id, charts: placed },
@@ -228,12 +258,19 @@ export function Workspace() {
               onAddChart={() => setSelectedId(null)}
             />
 
-            <aside className="w-full shrink-0 rounded-lg border border-[#e1e0d9] bg-[#fcfcfb] p-4 lg:w-80 print:hidden">
+            <aside
+              // Acompanha a rolagem: com várias folhas empilhadas, o painel do
+              // gráfico selecionado não pode ficar para trás.
+              className="w-full shrink-0 rounded-lg border border-[#e1e0d9] bg-[#fcfcfb] p-4 lg:sticky lg:top-24 lg:max-h-[calc(100vh-7rem)] lg:w-80 lg:overflow-y-auto print:hidden"
+            >
               {selected ? (
                 <ChartInspector
                   spec={selected}
                   workbook={payload.workbook}
                   palette={palette}
+                  page={selected.layout.page}
+                  pageCount={totalPaginas}
+                  onMoveToPage={(page) => moveToPage(selected, page)}
                   onChange={(next) => {
                     const table = payload.workbook.tables.find(
                       (item) => item.schema.key === next.tableKey,
@@ -254,7 +291,6 @@ export function Workspace() {
                 <AddChartPanel
                   suggestions={availableSuggestions}
                   palette={palette}
-                  hasRoom={hasRoom}
                   onAddSuggestion={addChart}
                   onCreateBlank={() => {
                     const table = payload.workbook.tables[0];

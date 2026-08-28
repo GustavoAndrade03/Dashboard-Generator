@@ -16,8 +16,6 @@ import { CHART_TYPE_HINTS, type ChartSpec } from "@/lib/dashboard/types";
 interface AddChartPanelProps {
   suggestions: ChartSpec[];
   palette: Palette;
-  /** false quando a folha está cheia: a página é uma só. */
-  hasRoom: boolean;
   onAddSuggestion: (spec: ChartSpec) => void;
   onCreateBlank: () => void;
 }
@@ -25,7 +23,6 @@ interface AddChartPanelProps {
 export function AddChartPanel({
   suggestions,
   palette,
-  hasRoom,
   onAddSuggestion,
   onCreateBlank,
 }: AddChartPanelProps) {
@@ -34,15 +31,10 @@ export function AddChartPanel({
       <div>
         <h2 className="text-sm font-semibold text-[#0b0b0b]">Adicionar um gráfico</h2>
         <p className="mt-1 text-xs text-[#52514e]">
-          Clique em um gráfico da folha para editá-lo.
+          Clique em um gráfico da folha para editá-lo. Quando a folha enche, o
+          gráfico novo abre a página seguinte.
         </p>
       </div>
-
-      {!hasRoom ? (
-        <p className="rounded-md border border-[#eda100] bg-white px-3 py-2 text-xs text-[#52514e]">
-          A folha está cheia. Remova ou diminua um gráfico para abrir espaço.
-        </p>
-      ) : null}
 
       {suggestions.length > 0 ? (
         <div className="flex flex-col gap-2">
@@ -51,9 +43,8 @@ export function AddChartPanel({
             <button
               key={suggestion.id}
               type="button"
-              disabled={!hasRoom}
               onClick={() => onAddSuggestion(suggestion)}
-              className="flex items-start gap-3 rounded-md border border-[#e1e0d9] p-2 text-left hover:border-[#2a78d6] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2a78d6]"
+              className="flex items-start gap-3 rounded-md border border-[#e1e0d9] p-2 text-left hover:border-[#2a78d6] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2a78d6]"
             >
               <ChartThumbnail
                 type={suggestion.type}
@@ -79,9 +70,8 @@ export function AddChartPanel({
 
       <button
         type="button"
-        disabled={!hasRoom}
         onClick={onCreateBlank}
-        className="rounded-md border border-[#e1e0d9] px-3 py-2 text-xs text-[#52514e] hover:border-[#2a78d6] hover:text-[#2a78d6] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2a78d6]"
+        className="rounded-md border border-[#e1e0d9] px-3 py-2 text-xs text-[#52514e] hover:border-[#2a78d6] hover:text-[#2a78d6] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2a78d6]"
       >
         Montar um gráfico escolhendo as colunas
       </button>

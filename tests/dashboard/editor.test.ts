@@ -1,9 +1,24 @@
 import { describe, expect, it } from "vitest";
 
 import { createChart, normalizeSpec } from "@/lib/dashboard/chart-spec";
-import { GRID_AREA_HEIGHT, GRID_GAP, GRID_ROWS, GRID_ROW_HEIGHT } from "@/lib/dashboard/page";
+import {
+  GRID_AREA_HEIGHT,
+  GRID_GAP,
+  GRID_ROWS,
+  GRID_ROW_HEIGHT,
+  PAGE_HEIGHT,
+  SHEET_HEIGHT,
+} from "@/lib/dashboard/page";
 import { PALETTES, colorAt, getPalette } from "@/lib/dashboard/palettes";
-import { TEMPLATES, applyTemplate, findFreeSlot, getTemplate } from "@/lib/dashboard/templates";
+import {
+  TEMPLATES,
+  applyTemplate,
+  findFreeSlot,
+  findSlotOnPage,
+  getTemplate,
+  normalizePages,
+  pageCount,
+} from "@/lib/dashboard/templates";
 import type { ChartSpec, PlacedChart } from "@/lib/dashboard/types";
 import { buildParsedTable } from "@/lib/parsing/schema-builder";
 
@@ -40,14 +55,27 @@ function spec(overrides: Partial<ChartSpec> = {}): ChartSpec {
   };
 }
 
-function placed(id: string, x: number, y: number, w: number, h: number): PlacedChart {
-  return { ...spec({ id }), layout: { x, y, w, h } };
+function placed(
+  id: string,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  page = 0,
+): PlacedChart {
+  return { ...spec({ id }), layout: { page, x, y, w, h } };
 }
 
 describe("geometria da folha", () => {
   it("a grade cheia cabe na área útil da página", () => {
     const altura = GRID_ROWS * GRID_ROW_HEIGHT + (GRID_ROWS - 1) * GRID_GAP;
     expect(altura).toBeLessThanOrEqual(GRID_AREA_HEIGHT);
+  });
+
+  it("a folha desenhada cabe no papel, com folga", () => {
+    // Um pixel a mais que a caixa da página faz o Chrome abrir uma folha em
+    // branco depois de cada folha cheia.
+    expect(SHEET_HEIGHT).toBeLessThan(PAGE_HEIGHT);
   });
 
   it("nenhum template posiciona um gráfico além do teto de linhas", () => {
@@ -81,7 +109,7 @@ describe("applyTemplate", () => {
   const template = getTemplate("indicadores-no-topo");
 
   it("manda indicadores para as vagas pequenas", () => {
-    const { placed: resultado } = applyTemplate(template, [
+    const resultado = applyTemplate(template, [
       spec({ id: "grafico", type: "bar" }),
       spec({ id: "numero", type: "kpi" }),
     ]);
@@ -94,25 +122,40 @@ describe("applyTemplate", () => {
 
   it("reposiciona sem apagar quando há vagas suficientes", () => {
     const entrada = Array.from({ length: 4 }, (_, i) => spec({ id: `c${i}` }));
-    const { placed: resultado, overflow } = applyTemplate(template, entrada);
+    const resultado = applyTemplate(template, entrada);
     expect(resultado).toHaveLength(4);
-    expect(overflow).toHaveLength(0);
+    expect(pageCount(resultado)).toBe(1);
   });
 
-  it("devolve o excedente quando o template é menor", () => {
+  it("abre folhas novas em vez de descartar o excedente", () => {
     const entrada = Array.from({ length: 6 }, (_, i) => spec({ id: `c${i}` }));
-    const { placed: resultado, overflow } = applyTemplate(getTemplate("grade"), entrada);
-    expect(resultado).toHaveLength(4);
-    expect(overflow.map((chart) => chart.id)).toEqual(["c4", "c5"]);
+    const resultado = applyTemplate(getTemplate("grade"), entrada);
+
+    expect(resultado).toHaveLength(6);
+    expect(pageCount(resultado)).toBe(2);
+    expect(resultado.filter((chart) => chart.layout.page === 1).map((chart) => chart.id)).toEqual([
+      "c4",
+      "c5",
+    ]);
   });
 
-  it("ordena de cima para baixo, da esquerda para a direita", () => {
+  it("ordena de cima para baixo, da esquerda para a direita dentro de cada folha", () => {
     const entrada = Array.from({ length: 6 }, (_, i) => spec({ id: `c${i}` }));
-    const { placed: resultado } = applyTemplate(template, entrada);
+    const resultado = applyTemplate(template, entrada);
     for (let i = 1; i < resultado.length; i++) {
       const anterior = resultado[i - 1].layout;
       const atual = resultado[i].layout;
+      if (anterior.page !== atual.page) continue;
       expect(anterior.y < atual.y || (anterior.y === atual.y && anterior.x <= atual.x)).toBe(true);
+    }
+  });
+
+  it("nenhum gráfico ultrapassa o teto de linhas da folha", () => {
+    const entrada = Array.from({ length: 20 }, (_, i) => spec({ id: `c${i}` }));
+    for (const template of TEMPLATES) {
+      for (const chart of applyTemplate(template, entrada)) {
+        expect(chart.layout.y + chart.layout.h).toBeLessThanOrEqual(GRID_ROWS);
+      }
     }
   });
 });
@@ -122,14 +165,49 @@ describe("findFreeSlot", () => {
 
   it("acha a primeira vaga livre", () => {
     const ocupadas: PlacedChart[] = [placed("a", 0, 0, 6, 6)];
-    expect(findFreeSlot(ocupadas, template, "large")).toEqual({ x: 6, y: 0, w: 6, h: 6 });
+    expect(findFreeSlot(ocupadas, template, "large")).toEqual({ page: 0, x: 6, y: 0, w: 6, h: 6 });
   });
 
-  it("devolve null quando a folha está cheia", () => {
+  it("abre a folha seguinte quando a atual está cheia", () => {
     const ocupadas = template.slots.map((slot, index) =>
       placed(`c${index}`, slot.x, slot.y, slot.w, slot.h),
     );
-    expect(findFreeSlot(ocupadas, template, "large")).toBeNull();
+    expect(findFreeSlot(ocupadas, template, "large").page).toBe(1);
+  });
+
+  it("prefere uma vaga livre numa folha anterior a abrir outra", () => {
+    const cheia = template.slots.map((slot, index) =>
+      placed(`c${index}`, slot.x, slot.y, slot.w, slot.h),
+    );
+    const segunda = [...cheia, placed("d0", 0, 0, 6, 6, 1)];
+    // A primeira está cheia, a segunda tem três vagas: nada de terceira folha.
+    expect(findFreeSlot(segunda, template, "large").page).toBe(1);
+  });
+});
+
+describe("folhas", () => {
+  it("uma folha vazia deixa de existir, para o PDF não sair com página em branco", () => {
+    const resultado = normalizePages([placed("a", 0, 0, 6, 6, 0), placed("b", 0, 0, 6, 6, 2)]);
+    expect(resultado.map((chart) => chart.layout.page)).toEqual([0, 1]);
+  });
+
+  it("mantém as folhas quando todas têm gráfico", () => {
+    const entrada = [placed("a", 0, 0, 6, 6, 0), placed("b", 0, 0, 6, 6, 1)];
+    expect(normalizePages(entrada)).toEqual(entrada);
+  });
+
+  it("conta pelo menos uma folha mesmo sem nenhum gráfico", () => {
+    expect(pageCount([])).toBe(1);
+  });
+
+  it("acha onde um gráfico cabe ao mudar de folha", () => {
+    const ocupantes = [placed("a", 0, 0, 6, 6, 1)];
+    expect(findSlotOnPage(ocupantes, 6, 6)).toEqual({ x: 6, y: 0 });
+  });
+
+  it("recusa quando a folha de destino não tem espaço", () => {
+    const ocupantes = [placed("a", 0, 0, 12, 12, 1)];
+    expect(findSlotOnPage(ocupantes, 6, 6)).toBeNull();
   });
 });
 

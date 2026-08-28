@@ -1,19 +1,24 @@
 /**
- * Templates de layout.
+ * Templates de layout e distribuição em folhas.
  *
- * Um template é uma lista ordenada de vagas na grade. Aplicar um template
- * **reposiciona** os gráficos existentes, nunca os apaga — se as vagas não
- * bastarem, quem chama avisa o usuário antes (CLAUDE.md, 11.5).
+ * Um template é uma lista ordenada de vagas em UMA folha. Como o dashboard
+ * tem quantas folhas forem necessárias, aplicar um template **reposiciona**
+ * os gráficos existentes e abre folhas novas conforme precisa — nunca apaga
+ * nada (CLAUDE.md, 11.5).
  *
  * Vagas `small` são preenchidas primeiro pelos indicadores (KPI), que são
  * apenas um número e ficariam ridículos ocupando meia folha.
  */
 
-import { GRID_COLS } from "@/lib/dashboard/page";
+import { GRID_COLS, GRID_ROWS } from "@/lib/dashboard/page";
 import type { ChartLayout, ChartSpec, PlacedChart } from "@/lib/dashboard/types";
 
-export interface TemplateSlot extends ChartLayout {
+export interface TemplateSlot {
   kind: "small" | "large";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export interface LayoutTemplate {
@@ -93,20 +98,35 @@ export function getTemplate(id: string): LayoutTemplate {
   return TEMPLATES.find((template) => template.id === id) ?? TEMPLATES[0];
 }
 
-export function templateCapacity(template: LayoutTemplate): number {
-  return template.slots.length;
+/** Quantas folhas o dashboard tem hoje. Sempre pelo menos uma. */
+export function pageCount(charts: PlacedChart[]): number {
+  return charts.reduce((total, chart) => Math.max(total, chart.layout.page + 1), 1);
 }
 
-/**
- * Distribui os gráficos nas vagas do template, na ordem em que aparecem.
- * Indicadores puxam as vagas pequenas; o resto puxa as grandes. O que não
- * couber é devolvido em `overflow` para quem chama decidir o que fazer.
- */
-export function applyTemplate(
+export function chartsOnPage(charts: PlacedChart[], page: number): PlacedChart[] {
+  return charts.filter((chart) => chart.layout.page === page);
+}
+
+interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+function overlaps(a: Rect, b: Rect): boolean {
+  return (
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+  );
+}
+
+/** Distribui gráficos nas vagas de UMA folha. O que não couber volta em `overflow`. */
+function fillPage(
   template: LayoutTemplate,
   charts: ChartSpec[],
+  page: number,
 ): { placed: PlacedChart[]; overflow: ChartSpec[] } {
-  const livres = template.slots.map((slot, index) => ({ slot, index, tomada: false }));
+  const livres = template.slots.map((slot) => ({ slot, tomada: false }));
   const placed: PlacedChart[] = [];
   const overflow: ChartSpec[] = [];
 
@@ -125,7 +145,7 @@ export function applyTemplate(
       continue;
     }
     const { x, y, w, h } = vaga.slot;
-    placed.push({ ...chart, layout: { x, y, w, h } });
+    placed.push({ ...chart, layout: { page, x, y, w, h } });
   }
 
   // Preserva a leitura de cima para baixo, da esquerda para a direita.
@@ -134,30 +154,92 @@ export function applyTemplate(
 }
 
 /**
- * Encontra uma vaga livre para um gráfico novo, sem mexer nos que já estão na
- * folha. Devolve null quando não há espaço — a folha é uma página só.
+ * Reposiciona todos os gráficos nas vagas do template, abrindo folhas até
+ * acabarem. Nenhum gráfico é descartado — é por isso que trocar de template
+ * não precisa mais avisar nada antes.
  */
-export function findFreeSlot(
+export function applyTemplate(template: LayoutTemplate, charts: ChartSpec[]): PlacedChart[] {
+  const placed: PlacedChart[] = [];
+  let restantes = charts;
+
+  for (let page = 0; restantes.length > 0; page++) {
+    const resultado = fillPage(template, restantes, page);
+    // Template sem vagas: sair daqui em vez de abrir folhas para sempre.
+    if (resultado.placed.length === 0) break;
+    placed.push(...resultado.placed);
+    restantes = resultado.overflow;
+  }
+
+  return placed;
+}
+
+/** Primeira vaga do template livre nesta folha, ou null se a folha está cheia. */
+function freeSlotOnPage(
   charts: PlacedChart[],
   template: LayoutTemplate,
   kind: TemplateSlot["kind"],
-): ChartLayout | null {
-  const ocupado = (slot: TemplateSlot) =>
-    charts.some(
-      (chart) =>
-        chart.layout.x < slot.x + slot.w &&
-        slot.x < chart.layout.x + chart.layout.w &&
-        chart.layout.y < slot.y + slot.h &&
-        slot.y < chart.layout.y + chart.layout.h,
-    );
-
+): TemplateSlot | null {
   const candidatas = [
     ...template.slots.filter((slot) => slot.kind === kind),
     ...template.slots.filter((slot) => slot.kind !== kind),
   ];
 
   for (const slot of candidatas) {
-    if (!ocupado(slot)) return { x: slot.x, y: slot.y, w: slot.w, h: slot.h };
+    if (!charts.some((chart) => overlaps(chart.layout, slot))) return slot;
   }
   return null;
+}
+
+/**
+ * Onde colocar um gráfico novo: a primeira vaga livre, folha a folha. Se todas
+ * estiverem cheias, ele abre a folha seguinte — a folha não é mais um limite.
+ */
+export function findFreeSlot(
+  charts: PlacedChart[],
+  template: LayoutTemplate,
+  kind: TemplateSlot["kind"],
+): ChartLayout {
+  const total = pageCount(charts);
+
+  for (let page = 0; page < total; page++) {
+    const vaga = freeSlotOnPage(chartsOnPage(charts, page), template, kind);
+    if (vaga) return { page, x: vaga.x, y: vaga.y, w: vaga.w, h: vaga.h };
+  }
+
+  const nova = template.slots.find((slot) => slot.kind === kind) ?? template.slots[0];
+  return { page: total, x: nova.x, y: 0, w: nova.w, h: nova.h };
+}
+
+/**
+ * Procura, célula a célula, onde um gráfico de tamanho `w` x `h` cabe numa
+ * folha já ocupada. Usado ao mover um gráfico de folha, quando o tamanho dele
+ * não corresponde a nenhuma vaga do template.
+ */
+export function findSlotOnPage(
+  ocupantes: PlacedChart[],
+  w: number,
+  h: number,
+): { x: number; y: number } | null {
+  for (let y = 0; y + h <= GRID_ROWS; y++) {
+    for (let x = 0; x + w <= GRID_COLS; x++) {
+      const candidata = { x, y, w, h };
+      if (!ocupantes.some((chart) => overlaps(chart.layout, candidata))) return { x, y };
+    }
+  }
+  return null;
+}
+
+/**
+ * Renumera as folhas para que não sobre nenhuma vazia no meio. Uma folha só
+ * existe enquanto tem gráfico: esvaziou, some — senão o PDF sairia com uma
+ * página em branco que o usuário não pediu.
+ */
+export function normalizePages(charts: PlacedChart[]): PlacedChart[] {
+  const usadas = [...new Set(charts.map((chart) => chart.layout.page))].sort((a, b) => a - b);
+  const destino = new Map(usadas.map((page, indice) => [page, indice]));
+
+  return charts.map((chart) => {
+    const page = destino.get(chart.layout.page) ?? 0;
+    return page === chart.layout.page ? chart : { ...chart, layout: { ...chart.layout, page } };
+  });
 }

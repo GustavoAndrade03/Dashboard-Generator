@@ -1,28 +1,30 @@
 "use client";
 
 /**
- * A folha. Não é uma "prévia": é a área de edição, e tem exatamente as
- * dimensões da área útil do A4 paisagem, então o usuário vê os limites da
- * página enquanto arrasta (CLAUDE.md, 11.1 e 11.2).
+ * As folhas. Não são uma "prévia": são a área de edição, e cada uma tem
+ * exatamente as dimensões da área útil do A4 paisagem, então o usuário vê os
+ * limites da página enquanto arrasta (CLAUDE.md, 11.1 e 11.2).
  *
- * A grade só aceita posições válidas — compactação vertical automática (nunca
- * sobra buraco) e teto de linhas igual à altura da folha. É a aplicação do
- * "restrinja as possibilidades em vez de dar liberdade total".
+ * O dashboard tem quantas folhas forem necessárias, empilhadas na vertical.
+ * Cada folha é uma grade independente com teto de linhas: é isso que impede
+ * um gráfico de atravessar a quebra de página e sair cortado no PDF.
  */
 
 import GridLayout, { type Layout } from "react-grid-layout";
 
 import { ChartCard } from "@/components/charts/ChartCard";
 import {
-  GRID_AREA_HEIGHT,
   GRID_COLS,
   GRID_GAP,
+  GRID_HEIGHT,
   GRID_ROWS,
   GRID_ROW_HEIGHT,
   PAGE_HEADER_HEIGHT,
   PAGE_WIDTH,
+  SHEET_HEIGHT,
 } from "@/lib/dashboard/page";
 import { getPalette } from "@/lib/dashboard/palettes";
+import { chartsOnPage, pageCount } from "@/lib/dashboard/templates";
 import type { DashboardPayload, PlacedChart } from "@/lib/dashboard/types";
 
 interface DashboardCanvasProps {
@@ -47,87 +49,119 @@ export function DashboardCanvas({
 }: DashboardCanvasProps) {
   const { config, workbook } = payload;
   const palette = getPalette(config.paletteId);
+  const total = pageCount(config.charts);
 
-  const layout: Layout = config.charts.map((chart) => ({ i: chart.id, ...chart.layout }));
-
-  function handleCommit(next: Layout) {
+  function handleCommit(page: number, next: Layout) {
     const porId = new Map(next.map((item) => [item.i, item]));
     onLayoutCommit(
       config.charts.map((chart) => {
         const item = porId.get(chart.id);
-        return item ? { ...chart, layout: { x: item.x, y: item.y, w: item.w, h: item.h } } : chart;
+        if (!item || chart.layout.page !== page) return chart;
+        return { ...chart, layout: { page, x: item.x, y: item.y, w: item.w, h: item.h } };
       }),
     );
   }
 
   return (
     <div className="overflow-x-auto print:overflow-visible">
-      <div
-        // A largura fixa é o que faz tela e papel coincidirem: o Recharts mede
-        // em JS, e uma caixa que mudasse de tamanho ao imprimir sairia errada.
-        style={{ width: PAGE_WIDTH }}
-        className="bg-white shadow-sm ring-1 ring-[#e1e0d9] print:shadow-none print:ring-0"
-        // Clicar no vazio da folha limpa a seleção.
-        onMouseDown={() => onSelect(null)}
-      >
-        <header style={{ height: PAGE_HEADER_HEIGHT }} className="flex flex-col justify-center">
-          <input
-            className="rgl-no-drag w-full truncate rounded border border-transparent bg-transparent px-1 text-xl font-semibold text-[#0b0b0b] hover:border-[#e1e0d9] focus:border-[#2a78d6] focus:outline-none"
-            value={config.title}
-            aria-label="Título do dashboard"
-            onChange={(event) => onDashboardTitleChange(event.target.value)}
-            onMouseDown={(event) => event.stopPropagation()}
-          />
-          <p className="truncate px-1 text-xs text-[#898781]">{workbook.source.label}</p>
-        </header>
-
-        {config.charts.length === 0 ? (
-          <EmptyCanvas onAddChart={onAddChart} />
-        ) : (
-          <div style={{ minHeight: GRID_AREA_HEIGHT }}>
-            <GridLayout
-              width={PAGE_WIDTH}
-              layout={layout}
-              gridConfig={{
-                cols: GRID_COLS,
-                rowHeight: GRID_ROW_HEIGHT,
-                margin: [GRID_GAP, GRID_GAP],
-                containerPadding: [0, 0],
-                maxRows: GRID_ROWS,
-              }}
-              // Campos de texto e controles não podem iniciar um arrasto.
-              dragConfig={{ cancel: ".rgl-no-drag" }}
-              resizeConfig={{ handles: ["se"] }}
-              onDragStop={handleCommit}
-              onResizeStop={handleCommit}
+      {/* Bloco, não flex: o Chrome não pagina de forma confiável dentro de um
+          container flex, e é entre estas folhas que a quebra precisa cair. */}
+      <div className="w-max print:w-auto">
+        {Array.from({ length: total }, (_, page) => (
+          <section
+            key={page}
+            style={{ width: PAGE_WIDTH, height: SHEET_HEIGHT }}
+            // O espaço entre folhas é classe, e não estilo inline, porque
+            // precisa zerar na impressão — onde quem separa é a quebra.
+            className="dashboard-page mb-6 bg-white shadow-sm ring-1 ring-[#e1e0d9] last:mb-0 print:mb-0 print:shadow-none print:ring-0"
+            // Clicar no vazio da folha limpa a seleção.
+            onMouseDown={() => onSelect(null)}
+          >
+            <header
+              style={{ height: PAGE_HEADER_HEIGHT }}
+              className="flex items-center justify-between gap-4"
             >
-              {config.charts.map((chart) => (
-                <div
-                  key={chart.id}
-                  tabIndex={0}
-                  aria-label={`Gráfico ${chart.title}`}
-                  className={`cursor-grab rounded-lg outline-none ring-offset-2 active:cursor-grabbing ${
-                    selectedId === chart.id ? "ring-2 ring-[#2a78d6]" : "focus-visible:ring-2 focus-visible:ring-[#2a78d6]"
-                  }`}
-                  onMouseDown={(event) => {
-                    event.stopPropagation();
-                    onSelect(chart.id);
-                  }}
-                  // Navegar por teclado seleciona, então o painel de edição
-                  // acompanha o foco sem exigir clique.
-                  onFocus={() => onSelect(chart.id)}
-                >
-                  <ChartCard
-                    spec={chart}
-                    workbook={workbook}
-                    palette={palette}
-                    onTitleChange={(title) => onChartTitleChange(chart.id, title)}
-                  />
-                </div>
-              ))}
-            </GridLayout>
-          </div>
-        )}
+              <div className="min-w-0 flex-1">
+                {page === 0 ? (
+                  <>
+                    <input
+                      className="rgl-no-drag w-full truncate rounded border border-transparent bg-transparent px-1 text-xl font-semibold text-[#0b0b0b] hover:border-[#e1e0d9] focus:border-[#2a78d6] focus:outline-none"
+                      value={config.title}
+                      aria-label="Título do dashboard"
+                      onChange={(event) => onDashboardTitleChange(event.target.value)}
+                      onMouseDown={(event) => event.stopPropagation()}
+                    />
+                    <p className="truncate px-1 text-xs text-[#898781]">{workbook.source.label}</p>
+                  </>
+                ) : (
+                  // Nas folhas seguintes o título é só referência: quem edita
+                  // é o campo da primeira, para não haver dois donos do mesmo dado.
+                  <p className="truncate px-1 text-sm font-medium text-[#52514e]">{config.title}</p>
+                )}
+              </div>
+
+              {total > 1 ? (
+                <span className="shrink-0 px-1 text-xs text-[#898781]">
+                  Página {page + 1} de {total}
+                </span>
+              ) : null}
+            </header>
+
+            {config.charts.length === 0 ? (
+              <EmptyCanvas onAddChart={onAddChart} />
+            ) : (
+              <GridLayout
+                width={PAGE_WIDTH}
+                layout={chartsOnPage(config.charts, page).map((chart) => ({
+                  i: chart.id,
+                  x: chart.layout.x,
+                  y: chart.layout.y,
+                  w: chart.layout.w,
+                  h: chart.layout.h,
+                }))}
+                gridConfig={{
+                  cols: GRID_COLS,
+                  rowHeight: GRID_ROW_HEIGHT,
+                  margin: [GRID_GAP, GRID_GAP],
+                  containerPadding: [0, 0],
+                  maxRows: GRID_ROWS,
+                }}
+                // Campos de texto e controles não podem iniciar um arrasto.
+                dragConfig={{ cancel: ".rgl-no-drag" }}
+                resizeConfig={{ handles: ["se"] }}
+                onDragStop={(next) => handleCommit(page, next)}
+                onResizeStop={(next) => handleCommit(page, next)}
+              >
+                {chartsOnPage(config.charts, page).map((chart) => (
+                  <div
+                    key={chart.id}
+                    tabIndex={0}
+                    aria-label={`Gráfico ${chart.title}`}
+                    className={`cursor-grab rounded-lg outline-none ring-offset-2 active:cursor-grabbing ${
+                      selectedId === chart.id
+                        ? "ring-2 ring-[#2a78d6]"
+                        : "focus-visible:ring-2 focus-visible:ring-[#2a78d6]"
+                    }`}
+                    onMouseDown={(event) => {
+                      event.stopPropagation();
+                      onSelect(chart.id);
+                    }}
+                    // Navegar por teclado seleciona, então o painel de edição
+                    // acompanha o foco sem exigir clique.
+                    onFocus={() => onSelect(chart.id)}
+                  >
+                    <ChartCard
+                      spec={chart}
+                      workbook={workbook}
+                      palette={palette}
+                      onTitleChange={(title) => onChartTitleChange(chart.id, title)}
+                    />
+                  </div>
+                ))}
+              </GridLayout>
+            )}
+          </section>
+        ))}
       </div>
     </div>
   );
@@ -136,7 +170,7 @@ export function DashboardCanvas({
 function EmptyCanvas({ onAddChart }: { onAddChart: () => void }) {
   return (
     <div
-      style={{ height: GRID_AREA_HEIGHT }}
+      style={{ height: GRID_HEIGHT }}
       className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-[#c3c2b7]"
     >
       <p className="text-sm text-[#52514e]">Esta folha ainda está em branco.</p>

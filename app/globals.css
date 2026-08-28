@@ -101,6 +101,15 @@ body {
 }
 
 @media print {
+  /*
+   * Uma folha por página. A quebra vai ANTES de cada folha seguinte, e não
+   * depois de cada folha: `break-after` na última abriria uma página em branco
+   * no fim do PDF.
+   */
+  .dashboard-page + .dashboard-page {
+    break-before: page;
+  }
+
   /* Alças de redimensionar e sombra de arrasto não existem no papel. */
   .react-grid-item > .react-resizable-handle,
   .react-grid-item.react-grid-placeholder {

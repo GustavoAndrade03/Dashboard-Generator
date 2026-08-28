@@ -32,7 +32,12 @@ interface ChartInspectorProps {
   spec: ChartSpec;
   workbook: ParsedWorkbook;
   palette: Palette;
+  /** Folha em que este gráfico está, a partir de 0. */
+  page: number;
+  /** Quantas folhas o dashboard tem. */
+  pageCount: number;
   onChange: (spec: ChartSpec) => void;
+  onMoveToPage: (page: number) => void;
   onRemove: () => void;
 }
 
@@ -40,7 +45,10 @@ export function ChartInspector({
   spec,
   workbook,
   palette,
+  page,
+  pageCount,
   onChange,
+  onMoveToPage,
   onRemove,
 }: ChartInspectorProps) {
   const table = workbook.tables.find((item) => item.schema.key === spec.tableKey);
@@ -253,6 +261,23 @@ export function ChartInspector({
           </span>
         </label>
       ) : null}
+
+      <Campo rotulo="Página">
+        <select
+          className={selectClass}
+          value={page}
+          onChange={(event) => onMoveToPage(Number(event.target.value))}
+        >
+          {Array.from({ length: pageCount }, (_, indice) => (
+            <option key={indice} value={indice}>
+              Página {indice + 1}
+            </option>
+          ))}
+          {/* Abrir folha nova é uma opção da mesma lista: é assim que o
+              dashboard cresce além do que cabe numa página. */}
+          <option value={pageCount}>Nova página ({pageCount + 1})</option>
+        </select>
+      </Campo>
 
       <p className="text-xs text-[#898781]">
         O título é editado no próprio gráfico: clique nele e digite.

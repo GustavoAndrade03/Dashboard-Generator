@@ -1,11 +1,15 @@
 /**
  * Geometria da folha.
  *
- * Estes números são a razão de o WYSIWYG funcionar. A área de edição tem
- * exatamente as dimensões da área útil de um A4 paisagem com as margens de
- * 12mm declaradas no `@page` (globals.css), então o que o usuário arrasta na
- * tela ocupa o mesmo espaço no PDF — sem segunda implementação de layout
+ * Estes números são a razão de o WYSIWYG funcionar. Uma folha tem exatamente
+ * as dimensões da área útil de um A4 paisagem com as margens de 12mm
+ * declaradas no `@page` (globals.css), então o que o usuário arrasta na tela
+ * ocupa o mesmo espaço no PDF — sem segunda implementação de layout
  * (CLAUDE.md, 11.1).
+ *
+ * O dashboard tem quantas folhas forem necessárias. Cada folha é um bloco de
+ * altura fixa no fluxo normal, e a quebra de página cai entre elas — por isso
+ * nenhum gráfico é cortado ao meio no PDF.
  *
  * Mexeu aqui? Mexa também na margem do `@page`, ou tela e papel divergem.
  */
@@ -17,13 +21,18 @@ const A4_LONG_MM = 297;
 const A4_SHORT_MM = 210;
 const PAGE_MARGIN_MM = 12;
 
-/** 273mm — largura útil do A4 paisagem. */
-export const PAGE_WIDTH = Math.round((A4_LONG_MM - 2 * PAGE_MARGIN_MM) * PX_PER_MM);
+/**
+ * Área útil do A4 paisagem: 273mm x 186mm.
+ *
+ * Arredondar para baixo, e não para o mais próximo, é deliberado: um único
+ * pixel a mais que a caixa da página faz o Chrome abrir uma folha em branco
+ * depois de cada folha cheia.
+ */
+export const PAGE_WIDTH = Math.floor((A4_LONG_MM - 2 * PAGE_MARGIN_MM) * PX_PER_MM);
 
-/** 186mm — altura útil do A4 paisagem. */
-export const PAGE_HEIGHT = Math.round((A4_SHORT_MM - 2 * PAGE_MARGIN_MM) * PX_PER_MM);
+export const PAGE_HEIGHT = Math.floor((A4_SHORT_MM - 2 * PAGE_MARGIN_MM) * PX_PER_MM);
 
-/** Faixa do título do dashboard, no topo da folha. */
+/** Faixa do título, no topo de cada folha. */
 export const PAGE_HEADER_HEIGHT = 56;
 
 /** Altura restante para a grade depois do título. */
@@ -33,8 +42,9 @@ export const GRID_COLS = 12;
 export const GRID_GAP = 16;
 
 /**
- * Teto de linhas da grade. É o que impede o usuário de montar um dashboard que
- * não cabe na folha: acima disso o react-grid-layout recusa a posição.
+ * Teto de linhas de uma folha. É o que impede um gráfico de atravessar a
+ * quebra de página: acima disso o react-grid-layout recusa a posição, e o
+ * gráfico vai para a folha seguinte.
  */
 export const GRID_ROWS = 12;
 
@@ -45,3 +55,13 @@ export const GRID_ROWS = 12;
 export const GRID_ROW_HEIGHT = Math.floor(
   (GRID_AREA_HEIGHT - (GRID_ROWS - 1) * GRID_GAP) / GRID_ROWS,
 );
+
+/** Altura ocupada pela grade cheia. */
+export const GRID_HEIGHT = GRID_ROWS * GRID_ROW_HEIGHT + (GRID_ROWS - 1) * GRID_GAP;
+
+/**
+ * Altura desenhada da folha: o título mais a grade cheia, e não a área útil
+ * inteira do papel. A sobra de poucos pixels é a folga que garante que a folha
+ * seguinte comece numa página nova, em vez de numa página em branco.
+ */
+export const SHEET_HEIGHT = PAGE_HEADER_HEIGHT + GRID_HEIGHT;

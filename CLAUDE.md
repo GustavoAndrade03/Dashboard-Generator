@@ -28,11 +28,11 @@ teste, ver `tests/fixtures/`).
 **Implementado:** contrato `DataSource` e o adaptador `.xlsx`; Camada 1
 completa (leitura por blocos, mesclagens, detecção de cabeçalho, inferência de
 tipo com parsing pt-BR); Camada 2 com degradação automática para heurística;
-editor WYSIWYG da seção 11 (folha A4, grade com arrastar/redimensionar, painel
-contextual com recorte por indicador, templates, paletas, desfazer/refazer,
-edição dos valores);
-exportação pela janela de impressão do navegador; autenticação (Auth.js);
-schema Prisma.
+editor WYSIWYG da seção 11 (folhas A4 empilhadas, grade com
+arrastar/redimensionar, painel contextual com recorte por indicador,
+templates, paletas, desfazer/refazer, edição dos valores); exportação pela
+janela de impressão do navegador, com uma página por folha; autenticação
+(Auth.js); schema Prisma.
 
 O relatório real que motivou a leitura por blocos fica em
 `planilha_referencia.xlsx`, na raiz. Ele **não é versionado** (está no
@@ -169,7 +169,7 @@ Se uma tarefa parecer exigir algo desta lista, sinalize antes de implementar —
 
 1. **Qualidade da inferência automática (Camada 1) é o maior risco do produto.** Planilhas muito bagunçadas podem quebrar a detecção de estrutura. Priorize robustez e tratamento de casos extremos nessa camada.
 2. **UX da correção pós-sugestão precisa ser simples.** Como a abordagem é "adivinha primeiro, corrige depois", a interface de correção/edição é tão importante quanto o motor de sugestão em si.
-3. **Fidelidade do PDF ao dashboard customizado.** Como o PDF é a própria página impressa, a fidelidade vem de graça em conteúdo — mas não em largura: o `ResponsiveContainer` do Recharts mede em JS, então a prévia é fixada em 1032px (largura útil do A4 paisagem com margem de 12mm) para que tela e papel tenham a mesma medida. Ao mexer no layout da prévia, preserve isso. Em contrapartida, margens, escala e "gráficos de segundo plano" agora dependem das configurações de impressão do usuário.
+3. **Fidelidade do PDF ao dashboard customizado.** Como o PDF é a própria página impressa, a fidelidade vem de graça em conteúdo — mas não em largura: o `ResponsiveContainer` do Recharts mede em JS, então a folha é fixada em 1031px (largura útil do A4 paisagem com margem de 12mm, arredondada para baixo) para que tela e papel tenham a mesma medida. Ao mexer no layout da folha, preserve isso — inclusive o arredondamento para baixo: um pixel a mais que a caixa da página faz o Chrome abrir uma folha em branco depois de cada folha cheia. Em contrapartida, margens, escala e "gráficos de segundo plano" agora dependem das configurações de impressão do usuário.
 4. **Prompt da Camada 2 deve permanecer pequeno.** Nunca enviar a planilha inteira ou grandes volumes de dados brutos para a API de IA — apenas o schema resumido.
 
 ---
@@ -217,6 +217,8 @@ Escolhas já feitas, com o porquê. Não as reabra sem um motivo novo.
 | **Descartar o que a mesclagem duplica** | Uma mesclagem vertical chega como linha repetida e uma horizontal como coluna repetida (o `I:J` do TOTAL virava duas colunas idênticas). A regra é exata, não heurística: a célula pertence a uma mesclagem que começou antes dela. Vale **por bloco**, porque a mesma coluna é mesclada num quadro e independente em outro |
 | **Linhas de fechamento fora dos gráficos por padrão** | Plotar "Subtotal" ao lado das parcelas que ele soma achata todas as barras. Fica de fora por padrão, com uma opção visível no painel para incluir |
 | **Proteção condicional a `AUTH_SECRET`** | Mantém o desenvolvimento local sem nenhum setup, e liga a exigência de login em qualquer ambiente que defina o segredo |
+| **Uma grade por folha, e não uma grade contínua** | Para o dashboard crescer além de uma página, a alternativa era uma grade única fatiada pela impressão. O Chrome não fragmenta de forma confiável conteúdo posicionado em absoluto (que é como o `react-grid-layout` posiciona tudo), e um gráfico cortado ao meio no PDF é justamente o defeito que não pode existir. Folhas separadas, cada uma no fluxo normal com `break-before: page`, tornam a paginação exata. O preço é não arrastar um gráfico de uma folha para a outra — daí o campo "Página" no painel |
+| **Folha de 700px, e não os 703px do papel** | A folha desenhada é o título mais a grade cheia, não a área útil inteira do A4. A sobra de 3px é a folga que garante que a folha seguinte comece numa página nova. Com a folha exatamente do tamanho do papel, o Chrome abria uma página em branco depois de cada folha cheia — foi o que aconteceu na primeira versão, com a margem entre folhas em estilo inline (que não zera na impressão) |
 
 ### 10.1 Limitações conhecidas da Camada 1
 
@@ -255,7 +257,8 @@ negociável e tem três implicações obrigatórias:
   a representação fiel do resultado.
 - **A área de edição tem as proporções da página do PDF** (A4, paisagem). O
   usuário vê os limites da folha enquanto edita e entende naturalmente o que
-  cabe e o que não cabe.
+  cabe e o que não cabe. Quando não cabe, a folha seguinte aparece embaixo —
+  ver 11.2.
 - **A exportação imprime esse mesmo componente**, sem uma segunda
   implementação de layout. Se você se pegar escrevendo lógica de layout
   duplicada (uma para a tela, outra para o PDF), pare — a arquitetura está
@@ -270,6 +273,16 @@ negociável e tem três implicações obrigatórias:
   liberdade total — liberdade total gera resultados feios nas mãos de um leigo.
   Na prática: compactação vertical automática (sem buracos) e teto de linhas
   igual à altura da folha.
+- **O dashboard tem quantas folhas forem necessárias**, empilhadas na vertical
+  e roladas pela página. O teto de linhas continua valendo por folha: é ele que
+  impede um gráfico de atravessar a quebra de página e sair cortado no PDF.
+  Cada folha é uma grade independente, e a quebra de impressão cai entre elas.
+- A folha só existe enquanto tem gráfico. Esvaziou, some — senão o PDF sairia
+  com uma página em branco que o usuário não pediu.
+- Mover um gráfico de folha é o campo "Página" do painel contextual, que
+  também oferece "Nova página". Arrastar atravessando a borda da folha não
+  funciona: são grades separadas, e essa é a troca que compra a paginação
+  correta.
 
 ### 11.3 Seleção e edição contextual
 
@@ -320,8 +333,9 @@ selecionado for renomeado ou apagado, o recorte cai fora e volta a valer
 ### 11.5 Templates de layout
 
 - Seletor de layouts prontos (1 grande + 2 pequenos, grade 2x2, coluna única).
-- Trocar de template **reposiciona** os gráficos existentes, não os apaga. Se o
-  novo template comporta menos gráficos, avisar claramente antes de aplicar.
+- Trocar de template **reposiciona** os gráficos existentes, não os apaga.
+  Nenhum gráfico é descartado nem precisa de aviso prévio: quando as vagas de
+  uma folha acabam, o template abre a folha seguinte.
 
 ### 11.6 Customização visual (escopo enxuto)
 
@@ -333,8 +347,8 @@ selecionado for renomeado ou apagado, o recorte cai fora e volta a valer
 
 - Obrigatório, com atalhos (Ctrl+Z / Ctrl+Shift+Z) e botões visíveis.
 - Nenhuma ação destrutiva pede confirmação por modal — a reversibilidade
-  substitui a confirmação. A única exceção é a troca de template que descarta
-  gráficos (11.5).
+  substitui a confirmação. Não há exceção: desde que o dashboard passou a ter
+  quantas folhas forem necessárias, nem trocar de template descarta gráficos.
 
 ### 11.8 Gerar PDF
 
