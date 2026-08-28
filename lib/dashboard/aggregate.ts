@@ -2,8 +2,12 @@
  * Agregação dos dados normalizados para o formato que o Recharts consome.
  *
  * Vive fora de /components de propósito: a mesma função alimenta o editor na
- * tela e a página usada na exportação em PDF, o que é o que garante que o PDF
- * saia idêntico ao que o usuário viu (CLAUDE.md, seção 7.3).
+ * tela e a impressão, o que é o que garante que o PDF saia idêntico ao que o
+ * usuário viu (CLAUDE.md, seção 7.3).
+ *
+ * Os três níveis de um relatório em matriz (quadro, indicador, unidade) são
+ * resolvidos aqui: o quadro é `tableKey`, o indicador é recortado por
+ * `spec.filter` e as unidades são as `valueKeys`.
  */
 
 import type { Aggregation, ChartSpec, DateGranularity } from "@/lib/dashboard/types";
@@ -69,44 +73,88 @@ function formatBucketLabel(bucket: string, granularity: DateGranularity): string
   return `${day}/${month}/${year}`;
 }
 
+const TOTAL_ROW = /^\s*(sub)?total/i;
+
+/** "Subtotal", "TOTAL GERAL": o fechamento de um quadro, não uma categoria. */
+function isTotalRow(value: CellValue): boolean {
+  return typeof value === "string" && TOTAL_ROW.test(value);
+}
+
 function cellToText(value: CellValue): string {
   if (value === null || value === "") return "(vazio)";
   return String(value);
 }
 
+/**
+ * Aplica o recorte de indicadores. Vale para todos os formatos, inclusive KPI
+ * e tabela — é o que permite "o déficit de vagas do PAMC" ser um número só.
+ */
+function filteredRows(table: ParsedTable, spec: ChartSpec): CellValue[][] {
+  const filtro = spec.filter;
+  if (!filtro || filtro.values.length === 0) return table.rows;
+
+  const index = columnIndex(table, filtro.columnKey);
+  if (index < 0) return table.rows;
+
+  const mantidos = new Set(filtro.values);
+  return table.rows.filter((row) => mantidos.has(cellToText(row[index])));
+}
+
+export function distinctCategoryValues(table: ParsedTable, columnKey: string): string[] {
+  const index = table.schema.columns.findIndex((column) => column.key === columnKey);
+  if (index < 0) return [];
+
+  const vistos = new Set<string>();
+  const valores: string[] = [];
+  for (const row of table.rows) {
+    const texto = cellToText(row[index]);
+    if (vistos.has(texto)) continue;
+    vistos.add(texto);
+    valores.push(texto);
+  }
+  return valores;
+}
+
 export function buildChartData(workbook: ParsedWorkbook, spec: ChartSpec): ChartData {
   const table = findTable(workbook, spec.tableKey);
   if (!table) {
-    return { categoryLabel: "", series: [], rows: [], error: "Tabela não encontrada." };
+    return { categoryLabel: "", series: [], rows: [], error: "Quadro não encontrado." };
   }
 
+  const rows = filteredRows(table, spec);
   const valueColumns = spec.valueKeys
     .map((key) => ({ key, index: columnIndex(table, key) }))
     .filter((column) => column.index >= 0)
-    .map((column) => ({
-      ...column,
-      schema: table.schema.columns[column.index],
-    }));
+    .map((column) => ({ ...column, schema: table.schema.columns[column.index] }));
 
   if (spec.type === "kpi") {
     const column = valueColumns[0];
     if (!column) {
       return { categoryLabel: "", series: [], rows: [], error: "Nenhuma coluna selecionada." };
     }
-    const numbers = table.rows
+    const numbers = rows
       .map((row) => row[column.index])
       .filter((value): value is number => typeof value === "number");
+
+    // Com o recorte em um único indicador, ele é que nomeia o número.
+    const recorte = spec.filter?.values.length === 1 ? spec.filter.values[0] : null;
     return {
       categoryLabel: "",
       series: [],
       rows: [],
-      kpi: { label: column.schema.label, value: aggregateValues(numbers, spec.aggregation) },
+      kpi: {
+        label: recorte ? `${recorte} · ${column.schema.label}` : column.schema.label,
+        value: aggregateValues(numbers, spec.aggregation),
+      },
     };
   }
 
   if (spec.type === "table") {
-    const columns = valueColumns.length > 0 ? valueColumns : table.schema.columns.map((schema, index) => ({ key: schema.key, index, schema }));
-    const rows: ChartDatum[] = table.rows.slice(0, spec.limit).map((row, rowIndex) => {
+    const columns =
+      valueColumns.length > 0
+        ? valueColumns
+        : table.schema.columns.map((schema, index) => ({ key: schema.key, index, schema }));
+    const datums: ChartDatum[] = rows.slice(0, spec.limit).map((row, rowIndex) => {
       const datum: ChartDatum = { label: String(rowIndex + 1) };
       for (const column of columns) datum[column.key] = row[column.index] ?? null;
       return datum;
@@ -114,13 +162,18 @@ export function buildChartData(workbook: ParsedWorkbook, spec: ChartSpec): Chart
     return {
       categoryLabel: "",
       series: columns.map((column) => ({ key: column.key, label: column.schema.label })),
-      rows,
+      rows: datums,
     };
   }
 
   const categoryIdx = spec.categoryKey ? columnIndex(table, spec.categoryKey) : -1;
   if (categoryIdx < 0) {
-    return { categoryLabel: "", series: [], rows: [], error: "Coluna de agrupamento não encontrada." };
+    return {
+      categoryLabel: "",
+      series: [],
+      rows: [],
+      error: "Coluna de agrupamento não encontrada.",
+    };
   }
   const categorySchema = table.schema.columns[categoryIdx];
   const granularity: DateGranularity = spec.granularity ?? "month";
@@ -130,8 +183,9 @@ export function buildChartData(workbook: ParsedWorkbook, spec: ChartSpec): Chart
   const buckets = new Map<string, Map<string, number[]>>();
   const bucketOrder: string[] = [];
 
-  for (const row of table.rows) {
+  for (const row of rows) {
     const rawCategory = row[categoryIdx];
+    if (!spec.includeTotalRows && isTotalRow(rawCategory)) continue;
     const bucket =
       isDate && typeof rawCategory === "string"
         ? dateBucket(rawCategory, granularity)
@@ -167,8 +221,24 @@ export function buildChartData(workbook: ParsedWorkbook, spec: ChartSpec): Chart
 
   const aggregation: Aggregation = valueColumns.length === 0 ? "count" : spec.aggregation;
 
-  // A chave de ordenação (o bucket cru) fica fora do datum para não vazar
-  // como uma série extra para o Recharts.
+  /**
+   * Um indicador só, várias unidades: o eixo teria uma categoria e a leitura
+   * ficaria toda na legenda. Nesse caso as unidades viram o eixo — é o gráfico
+   * que o usuário quis dizer ao pedir "déficit de vagas por unidade".
+   */
+  if (bucketOrder.length === 1 && series.length > 1) {
+    const entry = buckets.get(bucketOrder[0]);
+    const porUnidade: ChartDatum[] = series.map((item) => ({
+      label: item.label,
+      valor: aggregateValues(entry?.get(item.key) ?? [], aggregation),
+    }));
+    return {
+      categoryLabel: bucketOrder[0],
+      series: [{ key: "valor", label: bucketOrder[0] }],
+      rows: porUnidade.slice(0, spec.limit),
+    };
+  }
+
   const entries = bucketOrder.map((bucket) => {
     const values = buckets.get(bucket);
     const datum: ChartDatum = {
@@ -177,6 +247,8 @@ export function buildChartData(workbook: ParsedWorkbook, spec: ChartSpec): Chart
     for (const item of series) {
       datum[item.key] = aggregateValues(values?.get(item.key) ?? [], aggregation);
     }
+    // A chave de ordenação (o bucket cru) fica fora do datum para não vazar
+    // como uma série extra para o Recharts.
     return { bucket, datum };
   });
 
@@ -188,7 +260,9 @@ export function buildChartData(workbook: ParsedWorkbook, spec: ChartSpec): Chart
     entries.sort((a, b) => Number(b.datum[primary] ?? 0) - Number(a.datum[primary] ?? 0));
   }
 
-  const rows = entries.slice(0, spec.limit).map((entry) => entry.datum);
-
-  return { categoryLabel: categorySchema.label, series, rows };
+  return {
+    categoryLabel: categorySchema.label,
+    series,
+    rows: entries.slice(0, spec.limit).map((entry) => entry.datum),
+  };
 }

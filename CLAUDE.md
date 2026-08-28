@@ -26,10 +26,19 @@ O scaffold está montado e o fluxo principal funciona de ponta a ponta: upload
 teste, ver `tests/fixtures/`).
 
 **Implementado:** contrato `DataSource` e o adaptador `.xlsx`; Camada 1
-completa (mesclagens, detecção de cabeçalho, inferência de tipo com parsing
-pt-BR); Camada 2 com degradação automática para heurística; editor de
-dashboard; exportação em PDF pela janela de impressão do navegador;
-autenticação (Auth.js); schema Prisma.
+completa (leitura por blocos, mesclagens, detecção de cabeçalho, inferência de
+tipo com parsing pt-BR); Camada 2 com degradação automática para heurística;
+editor WYSIWYG da seção 11 (folha A4, grade com arrastar/redimensionar, painel
+contextual com recorte por indicador, templates, paletas, desfazer/refazer,
+edição dos valores);
+exportação pela janela de impressão do navegador; autenticação (Auth.js);
+schema Prisma.
+
+O relatório real que motivou a leitura por blocos fica em
+`planilha_referencia.xlsx`, na raiz. Ele **não é versionado** (está no
+`.gitignore`), então o teste de regressão que o usa
+(`tests/parsing/split-blocks.test.ts`) é pulado quando o arquivo não está
+presente — os testes sintéticos do mesmo arquivo cobrem as regras.
 
 **Ainda não implementado:** persistência de dashboards — o schema existe, mas
 nenhuma rota grava ou lê do banco, e nenhuma migration foi criada. Hoje o
@@ -202,6 +211,11 @@ Escolhas já feitas, com o porquê. Não as reabra sem um motivo novo.
 | **Dados em coluna `Json`** | Nenhum free tier oferece storage de arquivo confiável. Para milhares de linhas, JSON no Postgres é suficiente e não adiciona infraestrutura |
 | **Tema claro único** | O PDF é a própria página impressa; um tema que segue a preferência do sistema faria o arquivo divergir do que está na tela |
 | **Fluxo todo em uma rota** | Os dados normalizados passam de alguns MB. Navegar entre rotas exigiria `sessionStorage` (que estoura) ou banco (que não deve ser obrigatório para usar a ferramenta) |
+| **`react-grid-layout`** no canvas | Arrastar, redimensionar, snap, compactação e teto de linhas prontos e testados. Escrever colisão e compactação à mão seriam centenas de linhas frágeis para o mesmo resultado. A v2 passa `nodeRef` ao `react-draggable`, então não esbarra no `findDOMNode` removido no React 19 |
+| **Paletas como reordenações das mesmas 8 matizes** | A ordem dos slots é o mecanismo de segurança para daltonismo, não enfeite. Cada paleta oferecida foi validada com o script do guia de visualização; ordenações inventadas à mão reprovaram |
+| **Leitura por blocos, não por aba** | Relatórios reais empilham vários quadros numa aba só. Tratar a aba como uma tabela produzia lixo: cabeçalho errado, tipos errados, tudo num balaio. A unidade de leitura passou a ser o bloco, delimitado por linhas em branco e por faixas de título mescladas |
+| **Descartar o que a mesclagem duplica** | Uma mesclagem vertical chega como linha repetida e uma horizontal como coluna repetida (o `I:J` do TOTAL virava duas colunas idênticas). A regra é exata, não heurística: a célula pertence a uma mesclagem que começou antes dela. Vale **por bloco**, porque a mesma coluna é mesclada num quadro e independente em outro |
+| **Linhas de fechamento fora dos gráficos por padrão** | Plotar "Subtotal" ao lado das parcelas que ele soma achata todas as barras. Fica de fora por padrão, com uma opção visível no painel para incluir |
 | **Proteção condicional a `AUTH_SECRET`** | Mantém o desenvolvimento local sem nenhum setup, e liga a exigência de login em qualquer ambiente que defina o segredo |
 
 ### 10.1 Limitações conhecidas da Camada 1
@@ -210,11 +224,170 @@ Escolhas já feitas, com o porquê. Não as reabra sem um motivo novo.
   consecutivos** são classificadas como `identifier` (confiança 0.6) mesmo
   quando são medidas. É o preço de detectar colunas de código; a UI de revisão
   marca "confira" e o usuário corrige.
-- Duas tabelas independentes na mesma aba, separadas por linhas em branco, são
-  tratadas como uma só — linhas vazias no meio são descartadas.
+- Um bloco só é reconhecido quando as faixas de título estão mescladas de ponta
+  a ponta ou há linhas em branco separando os quadros. Quadros colados um no
+  outro, sem separação nenhuma, continuam virando uma tabela só.
 - A detecção de cabeçalho exige que a linha seja majoritariamente texto, então
   planilhas cujo cabeçalho são apenas anos (`2022 2023 2024`) caem no
   nome gerado (`Coluna A`).
+
+---
+
+## 11. Editor WYSIWYG
+
+O editor é o coração do produto: é onde o usuário revisa as sugestões
+automáticas de gráficos e ajusta o dashboard antes de exportar em PDF.
+
+**Perfil do usuário:** pessoa leiga em análise de dados. Não sabe o que é
+"série temporal", "eixo categórico" ou "agregação". Nunca usou Power BI. Hoje
+monta gráficos manualmente no Excel e acha isso trabalhoso. Precisa conseguir ir
+do upload ao PDF sem ajuda externa e sem ler documentação.
+
+**Escala:** ≤10 usuários, uso semanal. Não otimizar para escala ou concorrência.
+
+### 11.1 Requisito central: WYSIWYG real
+
+O que o usuário edita na tela é exatamente o que sai no PDF. Isso não é
+negociável e tem três implicações obrigatórias:
+
+- **Não existe "modo preview".** Não implemente botão de visualização nem
+  alternância entre "modo edição" e "modo visualização". A tela de edição já é
+  a representação fiel do resultado.
+- **A área de edição tem as proporções da página do PDF** (A4, paisagem). O
+  usuário vê os limites da folha enquanto edita e entende naturalmente o que
+  cabe e o que não cabe.
+- **A exportação imprime esse mesmo componente**, sem uma segunda
+  implementação de layout. Se você se pegar escrevendo lógica de layout
+  duplicada (uma para a tela, outra para o PDF), pare — a arquitetura está
+  errada.
+
+### 11.2 Canvas do dashboard
+
+- Área central representando a página do PDF, com os gráficos posicionados.
+- Grade de 12 colunas com "snap": o usuário reposiciona e redimensiona por
+  arrastar/soltar, e a peça encaixa sozinha.
+- O layout não pode quebrar. Restrinja as possibilidades em vez de dar
+  liberdade total — liberdade total gera resultados feios nas mãos de um leigo.
+  Na prática: compactação vertical automática (sem buracos) e teto de linhas
+  igual à altura da folha.
+
+### 11.3 Seleção e edição contextual
+
+- Clicar em um gráfico o seleciona, com indicação visual clara.
+- Com um gráfico selecionado, as opções aparecem em um painel contextual,
+  aplicando-se apenas àquele gráfico.
+- Opções por gráfico:
+  - **Trocar o tipo** — alternativas como miniaturas visuais do resultado,
+    nunca como lista de nomes técnicos.
+  - **Trocar os dados** — seletores com os nomes das colunas da planilha do
+    usuário, exatamente como estão no arquivo dele.
+  - **Recortar por indicador** — ver 11.3.1.
+  - **Editar o título** — inline, clicando direto no título no canvas.
+  - **Remover**.
+- Nunca exigir que o usuário abra um menu genérico e depois escolha a qual
+  gráfico a configuração se aplica.
+
+### 11.3.1 Os três níveis de um relatório em matriz
+
+Os relatórios do usuário têm uma hierarquia que o editor precisa expor inteira:
+
+| Nível | Onde mora na planilha | Controle no painel |
+|---|---|---|
+| **Quadro** | a faixa de título da seção | "Quadro" |
+| **Indicador** | o rótulo na coluna da esquerda | "Mostrar apenas" |
+| **Unidade ou total** | as colunas do cabeçalho | "Colunas com os valores" |
+
+O recorte por indicador vale para **todos os formatos**, inclusive número e
+tabela — é o que permite "o déficit de vagas do PAMC" ser um número só.
+
+Quando o recorte deixa **um indicador e várias unidades**, as unidades passam
+a ser o eixo. Sem isso o gráfico teria uma categoria só e toda a leitura
+ficaria na legenda; com isso, sai o gráfico que o usuário quis dizer ao pedir
+"déficit de vagas por unidade".
+
+Recorte vazio significa "todos", nunca "nenhum": um indicador acrescentado na
+edição de valores entra sozinho, em vez de ficar invisível. E se o indicador
+selecionado for renomeado ou apagado, o recorte cai fora e volta a valer
+"todos" — degradação visível, em vez de um gráfico misteriosamente vazio.
+
+### 11.4 Adicionar gráficos
+
+- Botão claro para adicionar um gráfico.
+- Oferecer **primeiro** as sugestões restantes da Camada 2 — aquelas que não
+  couberam no dashboard inicial —, como opções prontas com preview visual.
+- Só depois oferecer montar um gráfico do zero escolhendo colunas.
+
+### 11.5 Templates de layout
+
+- Seletor de layouts prontos (1 grande + 2 pequenos, grade 2x2, coluna única).
+- Trocar de template **reposiciona** os gráficos existentes, não os apaga. Se o
+  novo template comporta menos gráficos, avisar claramente antes de aplicar.
+
+### 11.6 Customização visual (escopo enxuto)
+
+- Paletas de cores pré-definidas e harmônicas. **Sem color picker livre** —
+  usuário leigo com liberdade total de cor produz dashboards ilegíveis.
+- Título geral do dashboard, editável inline.
+
+### 11.7 Undo / Redo
+
+- Obrigatório, com atalhos (Ctrl+Z / Ctrl+Shift+Z) e botões visíveis.
+- Nenhuma ação destrutiva pede confirmação por modal — a reversibilidade
+  substitui a confirmação. A única exceção é a troca de template que descarta
+  gráficos (11.5).
+
+### 11.8 Gerar PDF
+
+- Botão de ação primária, sempre visível e sem ambiguidade.
+- A ação abre a janela de impressão do navegador, que é onde o usuário vê o
+  arquivo final e escolhe salvar.
+- Não há estado de carregamento nem falha de geração a tratar: nada é gerado no
+  servidor. (Este item exigia ambos quando a exportação era feita por
+  Puppeteer; ver seção 10.)
+
+### 11.9 Diretrizes de escrita da interface
+
+- **Vocabulário do usuário, não do sistema.** "Colunas da sua planilha", não
+  "campos do schema". "Trocar tipo de gráfico", não "alterar chart type".
+- **Voz ativa e consistente.** O botão que diz "Gerar PDF" produz uma mensagem
+  que diz "PDF gerado". A mesma ação mantém o mesmo nome em toda a interface.
+- **Estados vazios são convites à ação**, não avisos. Um canvas sem gráficos
+  diz o que fazer em seguida.
+- **Erros explicam causa e solução**, sem se desculpar e sem vagueza.
+- Interface em português (pt-BR), em sentence case, sem jargão técnico em
+  nenhuma label visível.
+
+### 11.10 Diretrizes de implementação
+
+- Componentes React funcionais com TypeScript.
+- Gráficos com Recharts, encapsulados em um componente que recebe a
+  configuração como prop — nunca lógica de dados dentro do componente visual.
+- O estado do dashboard (gráficos, posições, template, paleta, títulos) é um
+  **objeto serializável único**, persistível no banco e consumível pela
+  impressão sem transformação adicional.
+- O editor consome dados através da interface `DataSource` (seção 5) — não
+  acoplar ao upload de arquivo.
+- Acessibilidade mínima: foco de teclado visível, navegação por teclado nos
+  controles principais, respeito a `prefers-reduced-motion`.
+- Responsivo o suficiente para telas menores, mas o editor pode assumir
+  desktop como cenário principal.
+
+### 11.11 Edição dos valores da planilha
+
+O usuário corrige os dados **dentro do editor** — corrigir no arquivo e
+reenviar é justamente o trabalho que a ferramenta existe para evitar.
+
+- Uma tabela editável por quadro, com seleção de quadro quando houver mais de um.
+- O valor digitado passa pelo mesmo parsing da Camada 1: "1.234,50" numa coluna
+  numérica vira 1234,5, igual viria da planilha.
+- Apagar e acrescentar linhas também: é assim que o usuário tira do gráfico uma
+  linha de "Subtotal" que não deveria estar ali.
+- Toda alteração é um passo do histórico e reflete nos gráficos na hora.
+
+### 11.12 Fora do escopo desta parte
+
+Colaboração em tempo real, comentários, histórico de versões do dashboard,
+exportação em outros formatos, fórmulas ou colunas calculadas.
 
 ---
 

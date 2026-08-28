@@ -20,11 +20,22 @@ Não é preciso configurar nada para usar: sem banco e sem chave de IA, o fluxo
 completo (upload → revisão → gráficos → PDF) funciona, apenas com as sugestões
 vindas da heurística em vez do modelo.
 
-A exportação é o `Exportar PDF`, que abre a janela de impressão do navegador —
-o usuário vê o arquivo final ali e escolhe "Salvar como PDF". Não há geração de
-PDF no servidor.
+A área de edição é a própria folha A4: o que está na tela é o que sai no PDF,
+sem modo de visualização separado. Os valores vindos da planilha podem ser
+corrigidos no próprio editor, em "Valores da sua planilha". `Gerar PDF` abre a janela de impressão do
+navegador, onde o usuário vê o arquivo final e escolhe "Salvar como PDF" — não
+há geração de PDF no servidor.
 
-Para gerar uma planilha de teste propositalmente bagunçada:
+### Planilhas suportadas
+
+Além do formato "uma tabela por aba", a leitura entende relatórios reais: vários
+quadros empilhados na mesma aba, separados por faixas de título mescladas, com
+as unidades no cabeçalho e o indicador na coluna da esquerda. Cada quadro vira
+uma tabela própria, com o título da faixa como nome.
+
+O arquivo `planilha_referencia.xlsx` na raiz é um exemplo desse formato. Ele não
+é versionado, e o teste de regressão que o usa é pulado quando ele não está
+presente. Para gerar uma planilha de teste mais simples:
 
 ```bash
 node tests/fixtures/make-sample-xlsx.mjs amostra.xlsx
@@ -62,12 +73,12 @@ desenvolvimento:
 
 ```
 app/                    rotas (workspace, login, API de upload)
-components/             upload, revisão de schema, editor e gráficos
+components/             upload, canvas do editor, painéis e gráficos
 lib/
   data-sources/         contrato DataSource + implementação .xlsx
-  parsing/              Camada 1 — heurística determinística
+  parsing/              Camada 1 — leitura por blocos e heurística de tipos
   ai-suggestions/       Camada 2 — Claude, com fallback heurístico
-  dashboard/            modelo do dashboard, agregação e paleta
+  dashboard/            modelo, agregação, paletas, templates e histórico
 prisma/                 schema do banco
 tests/                  testes da Camada 1 e da agregação
 ```
@@ -77,7 +88,8 @@ stack está em [CLAUDE.md](CLAUDE.md).
 
 ## Testes
 
-A cobertura se concentra na Camada 1 (detecção de cabeçalho, inferência de
-tipo, normalização) e na agregação dos gráficos — é onde mora o maior risco do
-produto. A Camada 2 não é testada contra a API real: o caminho de degradação
+A cobertura se concentra na Camada 1 (divisão em blocos, detecção de cabeçalho,
+inferência de tipo, normalização) e na agregação dos gráficos — é onde mora o
+maior risco do produto. Há um teste de regressão sobre `planilha_referencia.xlsx`
+que é pulado se o arquivo não estiver presente. A Camada 2 não é testada contra a API real: o caminho de degradação
 para a heurística é que está coberto.

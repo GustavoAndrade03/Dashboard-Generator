@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildHeuristicCharts } from "@/lib/ai-suggestions/fallback-charts";
 import { buildChartData } from "@/lib/dashboard/aggregate";
+import { normalizeSpec } from "@/lib/dashboard/chart-spec";
 import type { ChartSpec } from "@/lib/dashboard/types";
 import { buildParsedTable, buildSchemaSummary } from "@/lib/parsing/schema-builder";
 import type { ParsedWorkbook } from "@/lib/parsing/types";
@@ -123,5 +124,131 @@ describe("buildChartData", () => {
   it("reporta erro legível quando a coluna sumiu", () => {
     const data = buildChartData(parsed, { ...base, categoryKey: "inexistente" });
     expect(data.error).toBeTruthy();
+  });
+});
+
+describe("linhas de fechamento", () => {
+  const comSubtotal: ParsedWorkbook = {
+    source: { kind: "xlsx-upload", label: "relatorio.xlsx", config: {} },
+    tables: [
+      buildParsedTable(
+        {
+          name: "Regime",
+          cells: [
+            ["Indicador", "TOTAL"],
+            ["Provisórios", 100],
+            ["Fechado", 200],
+            ["Subtotal", 300],
+          ],
+          merges: [],
+        },
+        0,
+      ),
+    ],
+  };
+  const chaves = comSubtotal.tables[0].schema.columns.map((column) => column.key);
+  const base: ChartSpec = {
+    id: "c1",
+    type: "bar",
+    title: "Teste",
+    tableKey: "t0",
+    categoryKey: chaves[0],
+    valueKeys: [chaves[1]],
+    aggregation: "sum",
+    limit: 12,
+    rationale: "",
+    origin: "heuristic",
+  };
+
+  it("deixa a linha de subtotal de fora por padrão", () => {
+    const data = buildChartData(comSubtotal, base);
+    expect(data.rows.map((row) => row.label)).toEqual(["Fechado", "Provisórios"]);
+  });
+
+  it("inclui quando o usuário pede", () => {
+    const data = buildChartData(comSubtotal, { ...base, includeTotalRows: true });
+    expect(data.rows.map((row) => row.label)).toContain("Subtotal");
+  });
+});
+
+describe("recorte por indicador", () => {
+  const matriz: ParsedWorkbook = {
+    source: { kind: "xlsx-upload", label: "relatorio.xlsx", config: {} },
+    tables: [
+      buildParsedTable(
+        {
+          name: "Vagas",
+          cells: [
+            [null, "PAMC", "CPMBV", "TOTAL"],
+            ["DÉFICIT DE VAGAS", -693, -274, -1093],
+            ["VAGAS DISPONÍVEIS", 0, 0, 181],
+            ["CAPACIDADE GERAL", 1094, 478, 3062],
+          ],
+          merges: [],
+        },
+        0,
+      ),
+    ],
+  };
+  const [indicador, pamc, cpmbv, total] = matriz.tables[0].schema.columns.map((c) => c.key);
+
+  const base: ChartSpec = {
+    id: "c1",
+    type: "bar",
+    title: "Teste",
+    tableKey: "t0",
+    categoryKey: indicador,
+    valueKeys: [total],
+    aggregation: "sum",
+    limit: 12,
+    rationale: "",
+    origin: "user",
+  };
+
+  it("nomeia a coluna sem cabeçalho de indicadores", () => {
+    expect(matriz.tables[0].schema.columns[0].label).toBe("Indicador");
+  });
+
+  it("sem recorte mostra todos os indicadores", () => {
+    expect(buildChartData(matriz, base).rows).toHaveLength(3);
+  });
+
+  it("mostra apenas o indicador escolhido", () => {
+    const data = buildChartData(matriz, {
+      ...base,
+      filter: { columnKey: indicador, values: ["DÉFICIT DE VAGAS"] },
+    });
+    expect(data.rows).toHaveLength(1);
+    expect(data.rows[0][total]).toBe(-1093);
+  });
+
+  it("um indicador com várias unidades vira um gráfico por unidade", () => {
+    const data = buildChartData(matriz, {
+      ...base,
+      valueKeys: [pamc, cpmbv, total],
+      filter: { columnKey: indicador, values: ["DÉFICIT DE VAGAS"] },
+    });
+    expect(data.rows.map((row) => row.label)).toEqual(["PAMC", "CPMBV", "TOTAL"]);
+    expect(data.rows[0].valor).toBe(-693);
+  });
+
+  it("recorta também o KPI, e o indicador nomeia o número", () => {
+    const data = buildChartData(matriz, {
+      ...base,
+      type: "kpi",
+      valueKeys: [pamc],
+      filter: { columnKey: indicador, values: ["DÉFICIT DE VAGAS"] },
+    });
+    expect(data.kpi?.value).toBe(-693);
+    expect(data.kpi?.label).toBe("DÉFICIT DE VAGAS · PAMC");
+  });
+
+  it("descarta o recorte quando o indicador some dos dados", () => {
+    const table = matriz.tables[0];
+    const normalizado = normalizeSpec(
+      { ...base, filter: { columnKey: indicador, values: ["INDICADOR QUE NÃO EXISTE"] } },
+      table,
+    );
+    expect(normalizado.filter).toBeUndefined();
   });
 });

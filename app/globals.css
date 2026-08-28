@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "react-grid-layout/css/styles.css";
 
 /*
  * Tema único (claro). Não há variante escura de propósito: o PDF é gerado
@@ -56,5 +57,65 @@ body {
   *::after {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
+  }
+}
+
+/*
+ * Grade do editor. O pacote traz um placeholder vermelho e alças invisíveis
+ * por padrão; aqui eles viram parte da linguagem visual do produto.
+ */
+.react-grid-item.react-grid-placeholder {
+  background: #2a78d6;
+  opacity: 0.12;
+  border-radius: 0.5rem;
+}
+
+.react-grid-item > .react-resizable-handle::after {
+  border-right-color: var(--baseline);
+  border-bottom-color: var(--baseline);
+}
+
+/* Quem pediu menos movimento não deve levar animação de arrasto. */
+@media (prefers-reduced-motion: reduce) {
+  .react-grid-layout,
+  .react-grid-item {
+    transition: none !important;
+  }
+}
+
+/*
+ * O Recharts torna o gráfico focável (camada de acessibilidade, que permite
+ * navegar os pontos pelo teclado). O contorno padrão do navegador aparecia
+ * também ao clicar com o mouse — e ia parar no PDF. Aqui ele vira um anel de
+ * foco de verdade: some no clique, aparece no teclado, nunca imprime.
+ */
+.recharts-wrapper:focus,
+.recharts-surface:focus {
+  outline: none;
+}
+
+.recharts-wrapper:focus-visible {
+  outline: 2px solid #2a78d6;
+  outline-offset: 2px;
+  border-radius: 0.25rem;
+}
+
+@media print {
+  /* Alças de redimensionar e sombra de arrasto não existem no papel. */
+  .react-grid-item > .react-resizable-handle,
+  .react-grid-item.react-grid-placeholder {
+    display: none;
+  }
+
+  /* O contorno de seleção é da edição, não do documento. */
+  .react-grid-item {
+    box-shadow: none !important;
+    --tw-ring-shadow: 0 0 #0000 !important;
+  }
+
+  .react-grid-item :focus,
+  .react-grid-item :focus-visible,
+  .recharts-wrapper:focus-visible {
+    outline: none !important;
   }
 }

@@ -2,25 +2,34 @@
 
 /**
  * Orquestra o fluxo inteiro numa única rota: upload -> revisão -> edição ->
- * exportação.
+ * PDF. Não há "modo visualização": a folha que o usuário edita já é o
+ * resultado (CLAUDE.md, 11.1).
  *
  * Manter tudo em uma página é deliberado. Os dados normalizados podem passar
  * de alguns megabytes, e navegar entre rotas exigiria persistir isso em
  * sessionStorage (que estoura) ou no banco (que ainda não é obrigatório para
  * usar a ferramenta).
- *
- * A exportação é `window.print()`: o usuário vê o arquivo final na janela de
- * impressão antes de salvar. O que não deve sair no papel está marcado com
- * `print:hidden`.
  */
 
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { DashboardView } from "@/components/charts/DashboardView";
-import { ChartEditor } from "@/components/editor/ChartEditor";
+import { AddChartPanel } from "@/components/editor/AddChartPanel";
+import { ChartInspector } from "@/components/editor/ChartInspector";
+import { DataEditor } from "@/components/editor/DataEditor";
+import { DashboardCanvas } from "@/components/editor/DashboardCanvas";
+import { EditorToolbar } from "@/components/editor/EditorToolbar";
 import { SchemaReview } from "@/components/editor/SchemaReview";
 import { UploadForm } from "@/components/upload/UploadForm";
-import type { ChartSpec, DashboardPayload } from "@/lib/dashboard/types";
+import { createChart, normalizeSpec } from "@/lib/dashboard/chart-spec";
+import { DEFAULT_PALETTE_ID, getPalette, type PaletteId } from "@/lib/dashboard/palettes";
+import {
+  DEFAULT_TEMPLATE_ID,
+  applyTemplate,
+  findFreeSlot,
+  getTemplate,
+} from "@/lib/dashboard/templates";
+import type { ChartSpec, DashboardPayload, PlacedChart } from "@/lib/dashboard/types";
+import { useHistory } from "@/lib/dashboard/use-history";
 import type { ParsedWorkbook } from "@/lib/parsing/types";
 
 interface UploadResponse {
@@ -30,15 +39,48 @@ interface UploadResponse {
   warning?: string;
 }
 
+/** Janela em que digitar continua sendo o mesmo passo do histórico. */
+const TYPING_WINDOW_MS = 1000;
+
 function titleFromFileName(fileName: string): string {
   return fileName.replace(/\.xlsx$/i, "").replace(/[_-]+/g, " ").trim() || "Dashboard";
 }
 
 export function Workspace() {
-  const [payload, setPayload] = useState<DashboardPayload | null>(null);
+  const history = useHistory<DashboardPayload | null>(null);
+  const payload = history.state;
+
+  const [suggestions, setSuggestions] = useState<ChartSpec[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  // Digitação: o primeiro toque cria o passo, os seguintes só atualizam. Sem
+  // isto, desfazer um título exigiria um Ctrl+Z por caractere.
+  const typing = useRef<{ key: string; until: number } | null>(null);
+  const editText = useCallback(
+    (key: string, next: DashboardPayload) => {
+      const agora = Date.now();
+      const sessao = typing.current;
+      if (!sessao || sessao.key !== key || agora > sessao.until) history.commit(next);
+      else history.replace(next);
+      typing.current = { key, until: agora + TYPING_WINDOW_MS };
+    },
+    [history],
+  );
+
+  const { undo, redo } = history;
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "z") return;
+      event.preventDefault();
+      if (event.shiftKey) redo();
+      else undo();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [undo, redo]);
 
   async function handleUpload(file: File) {
     setBusy(true);
@@ -51,66 +93,78 @@ export function Workspace() {
       const data = (await response.json()) as UploadResponse & { error?: string };
 
       if (!response.ok) {
-        setError(data.error ?? "Não foi possível processar a planilha.");
+        setError(data.error ?? "Não foi possível ler a planilha. Tente outro arquivo.");
         return;
       }
 
-      setPayload({
+      const template = getTemplate(DEFAULT_TEMPLATE_ID);
+      const { placed } = applyTemplate(template, data.charts);
+
+      setSuggestions(data.charts);
+      setSelectedId(null);
+      history.reset({
         workbook: data.workbook,
-        config: { title: titleFromFileName(file.name), charts: data.charts },
+        config: {
+          title: titleFromFileName(file.name),
+          templateId: template.id,
+          paletteId: DEFAULT_PALETTE_ID,
+          charts: placed,
+        },
       });
       setNotice(data.warning ?? null);
     } catch {
-      setError("Falha de rede ao enviar a planilha.");
+      setError("A planilha não chegou ao servidor. Verifique a conexão e envie de novo.");
     } finally {
       setBusy(false);
     }
   }
 
-  function updateConfig(charts: ChartSpec[]) {
-    setPayload((current) =>
-      current ? { ...current, config: { ...current.config, charts } } : current,
-    );
-  }
+  const template = getTemplate(payload?.config.templateId ?? DEFAULT_TEMPLATE_ID);
+  const palette = getPalette(payload?.config.paletteId ?? DEFAULT_PALETTE_ID);
+  const charts = useMemo(() => payload?.config.charts ?? [], [payload]);
 
-  function addChart() {
+  /** Sugestões ainda não usadas. Derivar (em vez de guardar) mantém o desfazer coerente. */
+  const availableSuggestions = useMemo(
+    () => suggestions.filter((item) => !charts.some((chart) => chart.id === item.id)),
+    [suggestions, charts],
+  );
+
+  const selected = charts.find((chart) => chart.id === selectedId) ?? null;
+
+  function commitCharts(next: PlacedChart[]) {
     if (!payload) return;
-    const table = payload.workbook.tables[0];
-    if (!table) return;
-    const category = table.schema.columns.find((column) =>
-      ["date", "category", "boolean"].includes(column.type),
-    );
-    const value = table.schema.columns.find((column) => column.type === "number");
-
-    updateConfig([
-      ...payload.config.charts,
-      {
-        id: crypto.randomUUID(),
-        type: "bar",
-        title: "Novo gráfico",
-        tableKey: table.schema.key,
-        categoryKey: category?.key ?? null,
-        valueKeys: value ? [value.key] : [],
-        aggregation: value ? "sum" : "count",
-        limit: 12,
-        rationale: "",
-        origin: "user",
-      },
-    ]);
+    history.commit({ ...payload, config: { ...payload.config, charts: next } });
   }
+
+  function addChart(spec: ChartSpec) {
+    if (!payload) return;
+    const kind = spec.type === "kpi" ? "small" : "large";
+    const layout = findFreeSlot(charts, template, kind);
+    if (!layout) {
+      setError("A folha está cheia. Remova ou diminua um gráfico para abrir espaço.");
+      return;
+    }
+    setError(null);
+    commitCharts([...charts, { ...spec, layout }]);
+    setSelectedId(spec.id);
+  }
+
+  const hasRoom = findFreeSlot(charts, template, "large") !== null;
 
   return (
-    <main className="mx-auto flex w-full max-w-6xl flex-col gap-8 p-6 print:max-w-none print:gap-0 print:p-0">
+    <main className="mx-auto flex w-full max-w-[1420px] flex-col gap-6 p-6 print:max-w-none print:gap-0 print:p-0">
       <header className="print:hidden">
-        <h1 className="text-2xl font-semibold text-[#0b0b0b]">Planilha em Dashboard</h1>
+        <h1 className="text-2xl font-semibold text-[#0b0b0b]">Planilha em dashboard</h1>
         <p className="mt-1 text-sm text-[#52514e]">
-          Envie um .xlsx, confira o que foi detectado e exporte em PDF.
+          Envie um .xlsx, ajuste o que a análise sugeriu e gere o PDF.
         </p>
       </header>
 
-      <div className="print:hidden">
-        <UploadForm onUpload={handleUpload} busy={busy} />
-      </div>
+      {!payload ? (
+        <div className="print:hidden">
+          <UploadForm onUpload={handleUpload} busy={busy} />
+        </div>
+      ) : null}
 
       {error ? (
         <p className="rounded-md border border-[#e34948] bg-white px-4 py-3 text-sm text-[#e34948] print:hidden">
@@ -125,80 +179,122 @@ export function Workspace() {
 
       {payload ? (
         <>
-          <section className="flex flex-col gap-3 print:hidden">
-            <h2 className="text-lg font-semibold text-[#0b0b0b]">1. Dados detectados</h2>
-            <SchemaReview
-              workbook={payload.workbook}
-              onChange={(workbook) =>
-                setPayload((current) => (current ? { ...current, workbook } : current))
+          <EditorToolbar
+            templateId={payload.config.templateId}
+            paletteId={payload.config.paletteId}
+            chartCount={charts.length}
+            canUndo={history.canUndo}
+            canRedo={history.canRedo}
+            onUndo={history.undo}
+            onRedo={history.redo}
+            onTemplateChange={(id) => {
+              const proximo = getTemplate(id);
+              const { placed } = applyTemplate(proximo, charts);
+              history.commit({
+                ...payload,
+                config: { ...payload.config, templateId: id, charts: placed },
+              });
+            }}
+            onPaletteChange={(id: PaletteId) =>
+              history.commit({ ...payload, config: { ...payload.config, paletteId: id } })
+            }
+            onAddChart={() => setSelectedId(null)}
+            onPrint={() => window.print()}
+          />
+
+          <div className="flex flex-col items-start gap-6 lg:flex-row print:block">
+            <DashboardCanvas
+              payload={payload}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onLayoutCommit={commitCharts}
+              onChartTitleChange={(id, title) =>
+                editText(`titulo-${id}`, {
+                  ...payload,
+                  config: {
+                    ...payload.config,
+                    charts: charts.map((chart) =>
+                      chart.id === id ? { ...chart, title } : chart,
+                    ),
+                  },
+                })
               }
+              onDashboardTitleChange={(title) =>
+                editText("titulo-dashboard", {
+                  ...payload,
+                  config: { ...payload.config, title },
+                })
+              }
+              onAddChart={() => setSelectedId(null)}
             />
-          </section>
 
-          <section className="flex flex-col gap-3 print:hidden">
-            <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-[#0b0b0b]">2. Gráficos</h2>
-              <button
-                type="button"
-                onClick={addChart}
-                className="rounded-md border border-[#e1e0d9] px-3 py-1.5 text-sm text-[#52514e] hover:border-[#2a78d6] hover:text-[#2a78d6]"
-              >
-                Adicionar gráfico
-              </button>
-            </div>
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {payload.config.charts.map((chart) => (
-                <ChartEditor
-                  key={chart.id}
-                  spec={chart}
+            <aside className="w-full shrink-0 rounded-lg border border-[#e1e0d9] bg-[#fcfcfb] p-4 lg:w-80 print:hidden">
+              {selected ? (
+                <ChartInspector
+                  spec={selected}
                   workbook={payload.workbook}
-                  onChange={(updated) =>
-                    updateConfig(
-                      payload.config.charts.map((item) =>
-                        item.id === updated.id ? updated : item,
+                  palette={palette}
+                  onChange={(next) => {
+                    const table = payload.workbook.tables.find(
+                      (item) => item.schema.key === next.tableKey,
+                    );
+                    const normalizado = normalizeSpec(next, table);
+                    commitCharts(
+                      charts.map((chart) =>
+                        chart.id === next.id ? { ...normalizado, layout: chart.layout } : chart,
                       ),
-                    )
-                  }
-                  onRemove={() =>
-                    updateConfig(payload.config.charts.filter((item) => item.id !== chart.id))
-                  }
+                    );
+                  }}
+                  onRemove={() => {
+                    commitCharts(charts.filter((chart) => chart.id !== selected.id));
+                    setSelectedId(null);
+                  }}
                 />
-              ))}
-            </div>
-          </section>
+              ) : (
+                <AddChartPanel
+                  suggestions={availableSuggestions}
+                  palette={palette}
+                  hasRoom={hasRoom}
+                  onAddSuggestion={addChart}
+                  onCreateBlank={() => {
+                    const table = payload.workbook.tables[0];
+                    if (table) addChart(createChart(table, crypto.randomUUID()));
+                  }}
+                />
+              )}
+            </aside>
+          </div>
 
-          <section className="flex flex-col gap-3 print:gap-0">
-            <div className="flex items-center justify-between print:hidden">
-              <div>
-                <h2 className="text-lg font-semibold text-[#0b0b0b]">3. Prévia</h2>
-                <p className="text-xs text-[#898781]">
-                  O botão abre a janela de impressão do navegador, onde você vê o resultado
-                  final e escolhe “Salvar como PDF”.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="rounded-md bg-[#0b0b0b] px-4 py-2 text-sm font-medium text-white"
-              >
-                Exportar PDF
-              </button>
+          <details className="rounded-lg border border-[#e1e0d9] bg-[#fcfcfb] print:hidden">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-[#0b0b0b]">
+              Valores da sua planilha
+            </summary>
+            <div className="border-t border-[#e1e0d9] p-4">
+              <p className="mb-3 text-xs text-[#52514e]">
+                Corrija um número errado ou apague uma linha que não deve entrar nos gráficos.
+                Tudo é reversível pelo desfazer.
+              </p>
+              <DataEditor
+                workbook={payload.workbook}
+                onChange={(workbook) => history.commit({ ...payload, workbook })}
+              />
             </div>
-            {/*
-              A prévia é fixada na largura útil de uma folha A4 paisagem com as
-              margens de 12mm do @page (273mm ≈ 1032px a 96dpi). Isso não é
-              estético: o ResponsiveContainer do Recharts mede a largura em JS,
-              e se a caixa mudasse de tamanho ao imprimir, os gráficos sairiam
-              com a medida antiga. Igualando tela e papel, não há remedição.
-              A borda fica transparente em vez de sumir, para o box model não
-              mudar. O scroll horizontal atende telas estreitas.
-            */}
-            <div className="overflow-x-auto print:overflow-visible">
-              <div className="w-[1032px] rounded-lg border border-[#e1e0d9] bg-white p-4 print:rounded-none print:border-transparent">
-                <DashboardView payload={payload} />
-              </div>
+          </details>
+
+          <details className="rounded-lg border border-[#e1e0d9] bg-[#fcfcfb] print:hidden">
+            <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-[#0b0b0b]">
+              Colunas da sua planilha
+            </summary>
+            <div className="border-t border-[#e1e0d9] p-4">
+              <p className="mb-3 text-xs text-[#52514e]">
+                Confira como cada coluna foi entendida. Corrigir aqui atualiza os gráficos.
+              </p>
+              <SchemaReview
+                workbook={payload.workbook}
+                onChange={(workbook) => history.commit({ ...payload, workbook })}
+              />
             </div>
-          </section>
+          </details>
         </>
       ) : null}
     </main>

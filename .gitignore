@@ -23,6 +23,8 @@
 # misc
 .DS_Store
 *.pem
+planilha_referencia.xlsx
+split-blocks.test.ts
 
 # debug
 npm-debug.log*

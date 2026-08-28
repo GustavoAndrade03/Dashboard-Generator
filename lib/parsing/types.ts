@@ -48,8 +48,10 @@ export interface ColumnSchema {
 
 export interface TableSchema {
   key: string;
-  /** Nome da aba na planilha original. */
+  /** Nome exibido: a faixa de título do bloco, ou o nome da aba. */
   label: string;
+  /** Aba de origem. Uma aba pode render vários blocos. */
+  sheetName: string;
   /** Índice da linha de cabeçalho na grade normalizada, ou null se não houver. */
   headerRowIndex: number | null;
   headerConfidence: number;

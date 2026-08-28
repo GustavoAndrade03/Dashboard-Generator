@@ -1,9 +1,12 @@
 "use client";
 
 /**
- * Renderiza um ChartSpec. O mesmo componente serve a tela e a impressão: o
- * PDF é a própria página impressa pelo navegador, então não existe uma
- * segunda implementação para divergir da primeira.
+ * Renderiza um ChartSpec. O mesmo componente serve a tela e a impressão: o PDF
+ * é a própria página impressa pelo navegador, então não existe uma segunda
+ * implementação para divergir da primeira (CLAUDE.md, 11.1).
+ *
+ * O cartão preenche a altura da célula que recebe na grade — quem manda no
+ * tamanho é o layout, não o gráfico.
  *
  * Animações ficam desligadas de propósito: a impressão captura a página em um
  * instante, e uma animação em curso viraria um gráfico pela metade.
@@ -29,69 +32,91 @@ import {
 } from "recharts";
 
 import { buildChartData } from "@/lib/dashboard/aggregate";
-import { INK, formatCompact, formatNumber, seriesColor } from "@/lib/dashboard/palette";
+import { colorAt, type Palette } from "@/lib/dashboard/palettes";
+import { INK, formatCompact, formatNumber } from "@/lib/dashboard/theme";
 import type { ChartSpec } from "@/lib/dashboard/types";
 import type { ParsedWorkbook } from "@/lib/parsing/types";
 
-const CHART_HEIGHT = 260;
+/** Rótulos de categoria longos se sobrepõem em cartões estreitos. */
+const MAX_TICK_CHARS = 14;
+
+function shortenTick(value: unknown): string {
+  const texto = String(value ?? "");
+  return texto.length > MAX_TICK_CHARS ? `${texto.slice(0, MAX_TICK_CHARS - 1)}…` : texto;
+}
 
 const axisProps = {
   stroke: INK.baseline,
-  tick: { fill: INK.muted, fontSize: 12 },
+  tick: { fill: INK.muted, fontSize: 11 },
   tickLine: false,
 } as const;
 
 interface ChartCardProps {
   spec: ChartSpec;
   workbook: ParsedWorkbook;
+  palette: Palette;
+  /** Quando presente, o título vira editável no próprio cartão. */
+  onTitleChange?: (title: string) => void;
 }
 
-export function ChartCard({ spec, workbook }: ChartCardProps) {
+export function ChartCard({ spec, workbook, palette, onTitleChange }: ChartCardProps) {
   const data = useMemo(() => buildChartData(workbook, spec), [workbook, spec]);
 
   return (
-    <figure className="flex break-inside-avoid flex-col rounded-lg border border-[#e1e0d9] bg-[#fcfcfb] p-4">
-      <figcaption className="mb-3">
-        <h3 className="text-sm font-semibold text-[#0b0b0b]">{spec.title}</h3>
-        {spec.rationale ? (
-          <p className="mt-0.5 text-xs text-[#898781]">{spec.rationale}</p>
-        ) : null}
+    <figure className="flex h-full flex-col overflow-hidden rounded-lg border border-[#e1e0d9] bg-[#fcfcfb] p-3">
+      <figcaption className="mb-2 shrink-0">
+        {onTitleChange ? (
+          <input
+            // rgl-no-drag: sem isto, clicar para editar iniciaria um arrasto.
+            className="rgl-no-drag w-full truncate rounded border border-transparent bg-transparent px-1 py-0.5 text-sm font-semibold text-[#0b0b0b] hover:border-[#e1e0d9] focus:border-[#2a78d6] focus:outline-none"
+            value={spec.title}
+            aria-label="Título do gráfico"
+            onChange={(event) => onTitleChange(event.target.value)}
+          />
+        ) : (
+          <h3 className="truncate px-1 text-sm font-semibold text-[#0b0b0b]">{spec.title}</h3>
+        )}
       </figcaption>
 
-      {data.error ? (
-        <p className="py-8 text-center text-sm text-[#52514e]">{data.error}</p>
-      ) : (
-        <ChartBody spec={spec} data={data} />
-      )}
+      <div className="min-h-0 flex-1">
+        {data.error ? (
+          <p className="px-1 text-xs text-[#52514e]">{data.error}</p>
+        ) : (
+          <ChartBody spec={spec} data={data} palette={palette} />
+        )}
+      </div>
     </figure>
   );
 }
 
 type ChartData = ReturnType<typeof buildChartData>;
 
-function ChartBody({ spec, data }: { spec: ChartSpec; data: ChartData }) {
+interface BodyProps {
+  spec: ChartSpec;
+  data: ChartData;
+  palette: Palette;
+}
+
+function ChartBody({ spec, data, palette }: BodyProps) {
   if (spec.type === "kpi") {
     return (
-      <div className="py-6">
-        <p className="text-4xl font-semibold tabular-nums text-[#0b0b0b]">
+      <div className="flex h-full flex-col justify-center px-1">
+        <p className="truncate text-3xl font-semibold tabular-nums text-[#0b0b0b]">
           {formatNumber(data.kpi?.value)}
         </p>
-        <p className="mt-1 text-sm text-[#52514e]">{data.kpi?.label}</p>
+        <p className="mt-1 truncate text-xs text-[#52514e]">{data.kpi?.label}</p>
       </div>
     );
   }
 
-  if (spec.type === "table") {
-    return <DataTable data={data} />;
-  }
+  if (spec.type === "table") return <DataTable data={data} />;
 
   if (data.rows.length === 0) {
-    return <p className="py-8 text-center text-sm text-[#52514e]">Sem dados para exibir.</p>;
+    return <p className="px-1 text-xs text-[#52514e]">Sem dados para exibir.</p>;
   }
 
   // Legenda sempre presente a partir de 2 séries; com 1 série o título já a nomeia.
   const showLegend = data.series.length > 1;
-  // O Tooltip só aparece no hover, então não interfere na impressão.
   const tooltip = (
     <Tooltip
       formatter={(value: unknown) =>
@@ -105,11 +130,14 @@ function ChartBody({ spec, data }: { spec: ChartSpec; data: ChartData }) {
       }}
     />
   );
+  const legend = showLegend ? (
+    <Legend wrapperStyle={{ fontSize: 11, color: INK.secondary }} iconType="circle" iconSize={8} />
+  ) : null;
 
   if (spec.type === "pie") {
     const key = data.series[0].key;
     return (
-      <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
+      <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie
             data={data.rows}
@@ -118,16 +146,16 @@ function ChartBody({ spec, data }: { spec: ChartSpec; data: ChartData }) {
             innerRadius="45%"
             outerRadius="78%"
             isAnimationActive={false}
-            // Anel de 2px na cor da superfície separa as fatias adjacentes.
+            // Anel na cor da superfície separa as fatias adjacentes.
             stroke="#fcfcfb"
             strokeWidth={2}
           >
             {data.rows.map((row, index) => (
-              <Cell key={String(row.label)} fill={seriesColor(index)} />
+              <Cell key={String(row.label)} fill={colorAt(palette, index)} />
             ))}
           </Pie>
           <Legend
-            wrapperStyle={{ fontSize: 12, color: INK.secondary }}
+            wrapperStyle={{ fontSize: 11, color: INK.secondary }}
             iconType="circle"
             iconSize={8}
           />
@@ -140,18 +168,16 @@ function ChartBody({ spec, data }: { spec: ChartSpec; data: ChartData }) {
   const grid = <CartesianGrid stroke={INK.gridline} strokeDasharray="0" vertical={false} />;
   const axes = (
     <>
-      <XAxis dataKey="label" {...axisProps} />
-      <YAxis {...axisProps} tickFormatter={formatCompact} width={56} />
+      <XAxis dataKey="label" {...axisProps} tickFormatter={shortenTick} />
+      <YAxis {...axisProps} tickFormatter={formatCompact} width={48} />
     </>
   );
-  const legend = showLegend ? (
-    <Legend wrapperStyle={{ fontSize: 12, color: INK.secondary }} iconType="circle" iconSize={8} />
-  ) : null;
+  const margin = { top: 4, right: 8, bottom: 0, left: 0 };
 
   if (spec.type === "line") {
     return (
-      <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-        <LineChart data={data.rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={data.rows} margin={margin}>
           {grid}
           {axes}
           {data.series.map((series, index) => (
@@ -160,7 +186,7 @@ function ChartBody({ spec, data }: { spec: ChartSpec; data: ChartData }) {
               type="monotone"
               dataKey={series.key}
               name={series.label}
-              stroke={seriesColor(index)}
+              stroke={colorAt(palette, index)}
               strokeWidth={2}
               dot={false}
               isAnimationActive={false}
@@ -175,8 +201,8 @@ function ChartBody({ spec, data }: { spec: ChartSpec; data: ChartData }) {
 
   if (spec.type === "area") {
     return (
-      <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-        <AreaChart data={data.rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <AreaChart data={data.rows} margin={margin}>
           {grid}
           {axes}
           {data.series.map((series, index) => (
@@ -185,9 +211,9 @@ function ChartBody({ spec, data }: { spec: ChartSpec; data: ChartData }) {
               type="monotone"
               dataKey={series.key}
               name={series.label}
-              stroke={seriesColor(index)}
+              stroke={colorAt(palette, index)}
               strokeWidth={2}
-              fill={seriesColor(index)}
+              fill={colorAt(palette, index)}
               fillOpacity={0.15}
               isAnimationActive={false}
             />
@@ -200,8 +226,8 @@ function ChartBody({ spec, data }: { spec: ChartSpec; data: ChartData }) {
   }
 
   return (
-    <ResponsiveContainer width="100%" height={CHART_HEIGHT}>
-      <BarChart data={data.rows} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={data.rows} margin={margin}>
         {grid}
         {axes}
         {data.series.map((series, index) => (
@@ -209,7 +235,7 @@ function ChartBody({ spec, data }: { spec: ChartSpec; data: ChartData }) {
             key={series.key}
             dataKey={series.key}
             name={series.label}
-            fill={seriesColor(index)}
+            fill={colorAt(palette, index)}
             // Ponta arredondada só no topo, ancorada na linha de base.
             radius={[4, 4, 0, 0]}
             isAnimationActive={false}
@@ -224,12 +250,12 @@ function ChartBody({ spec, data }: { spec: ChartSpec; data: ChartData }) {
 
 function DataTable({ data }: { data: ChartData }) {
   return (
-    <div className="overflow-x-auto">
+    <div className="h-full overflow-auto">
       <table className="w-full text-left text-xs">
-        <thead>
+        <thead className="sticky top-0 bg-[#fcfcfb]">
           <tr className="border-b border-[#e1e0d9]">
             {data.series.map((series) => (
-              <th key={series.key} className="px-2 py-1.5 font-medium text-[#52514e]">
+              <th key={series.key} className="px-2 py-1 font-medium text-[#52514e]">
                 {series.label}
               </th>
             ))}
@@ -239,7 +265,7 @@ function DataTable({ data }: { data: ChartData }) {
           {data.rows.map((row, index) => (
             <tr key={index} className="border-b border-[#e1e0d9] last:border-0">
               {data.series.map((series) => (
-                <td key={series.key} className="px-2 py-1.5 text-[#0b0b0b]">
+                <td key={series.key} className="px-2 py-1 text-[#0b0b0b]">
                   {typeof row[series.key] === "number"
                     ? formatNumber(row[series.key] as number)
                     : String(row[series.key] ?? "—")}

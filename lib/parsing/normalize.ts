@@ -56,6 +56,33 @@ export function applyMerges(cells: RawValue[][], merges: MergeRange[]): RawValue
   return grid;
 }
 
+/**
+ * Remove linhas e colunas totalmente vazias, preservando o índice original de
+ * cada coluna mantida. É a etapa aplicada dentro de cada bloco, depois que a
+ * aba já foi cortada.
+ */
+export function trimEmpty(cells: RawValue[][], columnIndexes: number[]): NormalizedGrid {
+  const rowIndexes: number[] = [];
+  cells.forEach((row, index) => {
+    if (row.some((cell) => !isBlank(cell))) rowIndexes.push(index);
+  });
+
+  const mantidas: number[] = [];
+  const origem: number[] = [];
+  for (let col = 0; col < columnIndexes.length; col++) {
+    if (rowIndexes.some((row) => !isBlank(cells[row][col]))) {
+      mantidas.push(col);
+      origem.push(columnIndexes[col]);
+    }
+  }
+
+  return {
+    cells: rowIndexes.map((row) => mantidas.map((col) => cells[row][col] ?? null)),
+    columnIndexes: origem,
+    rowIndexes,
+  };
+}
+
 export interface NormalizedGrid {
   cells: RawValue[][];
   /** Índice original de cada coluna mantida (0-based na planilha). */
