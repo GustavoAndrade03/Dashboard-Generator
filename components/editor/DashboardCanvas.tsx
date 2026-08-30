@@ -8,6 +8,9 @@
  * O dashboard tem quantas folhas forem necessárias, empilhadas na vertical.
  * Cada folha é uma grade independente com teto de linhas: é isso que impede
  * um gráfico de atravessar a quebra de página e sair cortado no PDF.
+ *
+ * A folha é a única superfície branca da aplicação. Todo o resto é bancada
+ * escura, e é essa diferença que informa, sem texto nenhum, o que sai impresso.
  */
 
 import GridLayout, { type Layout } from "react-grid-layout";
@@ -22,10 +25,19 @@ import {
   PAGE_HEADER_HEIGHT,
   PAGE_WIDTH,
   SHEET_HEIGHT,
+  cardSize,
 } from "@/lib/dashboard/page";
 import { getPalette } from "@/lib/dashboard/palettes";
+import { getSheetTheme, sheetVars } from "@/lib/dashboard/themes";
 import { chartsOnPage, pageCount } from "@/lib/dashboard/templates";
 import type { DashboardPayload, PlacedChart } from "@/lib/dashboard/types";
+
+/**
+ * Espaço entre folhas na tela. Precisa bater com a classe `mb-6` aplicada em
+ * cada folha: é por ele que a régua de páginas calcula onde fica cada marca,
+ * em vez de medir o DOM a cada arrasto.
+ */
+const SHEET_GAP = 24;
 
 interface DashboardCanvasProps {
   payload: DashboardPayload;
@@ -49,7 +61,10 @@ export function DashboardCanvas({
 }: DashboardCanvasProps) {
   const { config, workbook } = payload;
   const palette = getPalette(config.paletteId);
+  const theme = getSheetTheme(config.themeId);
   const total = pageCount(config.charts);
+  const paginaAtiva =
+    config.charts.find((chart) => chart.id === selectedId)?.layout.page ?? null;
 
   function handleCommit(page: number, next: Layout) {
     const porId = new Map(next.map((item) => [item.i, item]));
@@ -65,15 +80,28 @@ export function DashboardCanvas({
   return (
     <div className="overflow-x-auto print:overflow-visible">
       {/* Bloco, não flex: o Chrome não pagina de forma confiável dentro de um
-          container flex, e é entre estas folhas que a quebra precisa cair. */}
-      <div className="w-max print:w-auto">
+          container flex, e é entre estas folhas que a quebra precisa cair. A
+          régua fica em posição absoluta, fora do fluxo que é paginado. */}
+      <div className="relative w-max pl-9 print:w-auto print:pl-0">
+        <ReguaDePaginas total={total} ativa={paginaAtiva} />
+
         {Array.from({ length: total }, (_, page) => (
           <section
             key={page}
-            style={{ width: PAGE_WIDTH, height: SHEET_HEIGHT }}
+            id={`folha-${page}`}
+            style={{
+              // As variáveis do tema descem daqui para tudo que está na folha:
+              // fundo do cartão, tinta, grade e anel de foco.
+              ...sheetVars(theme),
+              width: PAGE_WIDTH,
+              height: SHEET_HEIGHT,
+              // Uma subida só, escalonada: as folhas chegam como páginas de um
+              // documento, e não como cartões independentes.
+              animationDelay: `${page * 60}ms`,
+            }}
             // O espaço entre folhas é classe, e não estilo inline, porque
             // precisa zerar na impressão — onde quem separa é a quebra.
-            className="dashboard-page mb-6 bg-white shadow-sm ring-1 ring-[#e1e0d9] last:mb-0 print:mb-0 print:shadow-none print:ring-0"
+            className="dashboard-page folha mb-6 last:mb-0 print:mb-0"
             // Clicar no vazio da folha limpa a seleção.
             onMouseDown={() => onSelect(null)}
           >
@@ -85,23 +113,27 @@ export function DashboardCanvas({
                 {page === 0 ? (
                   <>
                     <input
-                      className="rgl-no-drag w-full truncate rounded border border-transparent bg-transparent px-1 text-xl font-semibold text-[#0b0b0b] hover:border-[#e1e0d9] focus:border-[#2a78d6] focus:outline-none"
+                      className="rgl-no-drag expandida w-full truncate rounded-[3px] border border-transparent bg-transparent px-1 text-xl font-semibold text-ink hover:border-gridline focus:border-ink focus:outline-none"
                       value={config.title}
                       aria-label="Título do dashboard"
                       onChange={(event) => onDashboardTitleChange(event.target.value)}
                       onMouseDown={(event) => event.stopPropagation()}
                     />
-                    <p className="truncate px-1 text-xs text-[#898781]">{workbook.source.label}</p>
+                    <p className="utilitaria truncate px-1 text-ink-3">
+                      {workbook.source.label}
+                    </p>
                   </>
                 ) : (
                   // Nas folhas seguintes o título é só referência: quem edita
                   // é o campo da primeira, para não haver dois donos do mesmo dado.
-                  <p className="truncate px-1 text-sm font-medium text-[#52514e]">{config.title}</p>
+                  <p className="expandida truncate px-1 text-sm font-semibold text-ink-2">
+                    {config.title}
+                  </p>
                 )}
               </div>
 
               {total > 1 ? (
-                <span className="shrink-0 px-1 text-xs text-[#898781]">
+                <span className="utilitaria shrink-0 px-1 text-ink-3">
                   Página {page + 1} de {total}
                 </span>
               ) : null}
@@ -137,10 +169,13 @@ export function DashboardCanvas({
                     key={chart.id}
                     tabIndex={0}
                     aria-label={`Gráfico ${chart.title}`}
-                    className={`cursor-grab rounded-lg outline-none ring-offset-2 active:cursor-grabbing ${
+                    // O anel de seleção é grafite, não azul: azul é a primeira
+                    // cor de série da paleta padrão, e a ferramenta não pode
+                    // usar a mesma tinta que o dado do usuário.
+                    className={`cursor-grab rounded-[6px] outline-none ring-offset-2 active:cursor-grabbing ${
                       selectedId === chart.id
-                        ? "ring-2 ring-[#2a78d6]"
-                        : "focus-visible:ring-2 focus-visible:ring-[#2a78d6]"
+                        ? "ring-2 ring-ink"
+                        : "focus-visible:ring-2 focus-visible:ring-ink"
                     }`}
                     onMouseDown={(event) => {
                       event.stopPropagation();
@@ -154,6 +189,8 @@ export function DashboardCanvas({
                       spec={chart}
                       workbook={workbook}
                       palette={palette}
+                      theme={theme}
+                      size={cardSize(chart.layout.w, chart.layout.h)}
                       onTitleChange={(title) => onChartTitleChange(chart.id, title)}
                     />
                   </div>
@@ -167,17 +204,73 @@ export function DashboardCanvas({
   );
 }
 
+/**
+ * Régua de páginas.
+ *
+ * A numeração só existe quando há mais de uma folha: com uma só, "1" não
+ * informa nada. As marcas são a ordem real das páginas do PDF, e clicar em uma
+ * leva até ela — que é o que falta quando o documento passa de três telas de
+ * altura.
+ */
+function ReguaDePaginas({ total, ativa }: { total: number; ativa: number | null }) {
+  if (total < 2) return null;
+
+  function irPara(page: number) {
+    const folha = document.getElementById(`folha-${page}`);
+    if (!folha) return;
+    const reduzido = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    folha.scrollIntoView({ block: "start", behavior: reduzido ? "auto" : "smooth" });
+  }
+
+  return (
+    <nav
+      aria-label="Páginas do dashboard"
+      className="absolute left-0 top-0 w-9 print:hidden"
+      style={{ height: total * SHEET_HEIGHT + (total - 1) * SHEET_GAP }}
+    >
+      <span aria-hidden className="absolute left-4 top-1 bottom-1 w-px bg-borda" />
+
+      {Array.from({ length: total }, (_, page) => (
+        <button
+          key={page}
+          type="button"
+          onClick={() => irPara(page)}
+          aria-current={page === ativa ? "true" : undefined}
+          className="group absolute left-0 flex w-9 items-center gap-1.5"
+          style={{ top: page * (SHEET_HEIGHT + SHEET_GAP) + PAGE_HEADER_HEIGHT / 2 - 8 }}
+        >
+          <span
+            aria-hidden
+            className={`utilitaria w-4 text-right leading-4 transition-colors ${
+              page === ativa ? "text-osso" : "text-osso-fraco group-hover:text-osso"
+            }`}
+          >
+            {page + 1}
+          </span>
+          <span
+            aria-hidden
+            className={`h-px w-2.5 transition-colors ${
+              page === ativa ? "bg-osso" : "bg-borda-forte group-hover:bg-osso"
+            }`}
+          />
+          <span className="sr-only">Ir para a página {page + 1}</span>
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 function EmptyCanvas({ onAddChart }: { onAddChart: () => void }) {
   return (
     <div
       style={{ height: GRID_HEIGHT }}
-      className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-[#c3c2b7]"
+      className="flex flex-col items-center justify-center gap-4 rounded-[6px] border border-dashed border-baseline"
     >
-      <p className="text-sm text-[#52514e]">Esta folha ainda está em branco.</p>
+      <p className="text-sm text-ink-2">Esta folha ainda está em branco.</p>
       <button
         type="button"
         onClick={onAddChart}
-        className="rounded-md bg-[#0b0b0b] px-4 py-2 text-sm font-medium text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2a78d6]"
+        className="expandida rounded-[3px] bg-ink px-4 py-2 text-sm font-semibold text-white"
       >
         Adicionar um gráfico
       </button>

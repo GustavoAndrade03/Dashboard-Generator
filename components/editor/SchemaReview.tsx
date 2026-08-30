@@ -62,48 +62,58 @@ export function SchemaReview({ workbook, onChange }: SchemaReviewProps) {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
       {workbook.tables.map((table) => (
-        <div key={table.schema.key} className="rounded-lg border border-[#e1e0d9] bg-[#fcfcfb]">
-          <div className="border-b border-[#e1e0d9] px-4 py-3">
-            <h3 className="text-sm font-semibold text-[#0b0b0b]">{table.schema.label}</h3>
-            <p className="text-xs text-[#898781]">
+        <div key={table.schema.key} className="rounded-[3px] border border-borda">
+          <div className="border-b border-borda px-4 py-3">
+            <h3 className="expandida text-sm font-semibold text-osso">{table.schema.label}</h3>
+            {/* Contagem e posição do cabeçalho são o que a máquina leu, não o
+                que a interface diz — daí o registro utilitário. */}
+            <p className="utilitaria mt-1 text-osso-fraco">
               {table.schema.rowCount} linhas · {table.schema.columns.length} colunas ·{" "}
               {table.schema.headerRowIndex === null
                 ? "cabeçalho não identificado"
                 : `cabeçalho na linha ${table.schema.headerRowIndex + 1}`}
             </p>
             {table.schema.warnings.map((warning) => (
-              <p key={warning} className="mt-1 text-xs text-[#eb6834]">
+              <p key={warning} className="mt-1.5 text-xs text-alarme">
                 {warning}
               </p>
             ))}
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
+          <div className="rolagem-bancada overflow-x-auto">
+            <table className="w-full max-w-4xl text-left text-sm">
               <thead>
-                <tr className="border-b border-[#e1e0d9] text-xs text-[#898781]">
-                  <th className="px-4 py-2 font-medium">Coluna</th>
-                  <th className="px-4 py-2 font-medium">Tipo</th>
-                  <th className="px-4 py-2 font-medium">Exemplos</th>
+                <tr className="border-b border-borda">
+                  <th className="utilitaria px-4 py-2 text-left font-normal text-osso-fraco">
+                    Coluna
+                  </th>
+                  <th className="utilitaria px-4 py-2 text-left font-normal text-osso-fraco">
+                    Tipo
+                  </th>
+                  <th className="utilitaria px-4 py-2 text-left font-normal text-osso-fraco">
+                    Exemplos
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {table.schema.columns.map((column) => (
-                  <tr key={column.key} className="border-b border-[#e1e0d9] last:border-0">
+                  <tr key={column.key} className="border-b border-borda last:border-0">
                     <td className="px-4 py-2">
                       <input
                         value={column.label}
+                        aria-label={`Nome da coluna ${column.label}`}
                         onChange={(event) =>
                           handleLabelChange(table.schema.key, column.key, event.target.value)
                         }
-                        className="w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-[#0b0b0b] hover:border-[#e1e0d9] focus:border-[#2a78d6] focus:outline-none"
+                        className="w-full rounded-[3px] border border-transparent bg-transparent px-1 py-0.5 text-sm text-osso hover:border-borda focus:border-osso-fraco focus:outline-none"
                       />
                     </td>
                     <td className="px-4 py-2">
                       <select
                         value={column.type}
+                        aria-label={`Tipo da coluna ${column.label}`}
                         onChange={(event) =>
                           handleTypeChange(
                             table.schema.key,
@@ -111,7 +121,7 @@ export function SchemaReview({ workbook, onChange }: SchemaReviewProps) {
                             event.target.value as ColumnType,
                           )
                         }
-                        className="rounded border border-[#e1e0d9] bg-white px-2 py-1 text-xs text-[#0b0b0b]"
+                        className="rounded-[3px] border border-borda bg-bancada px-2 py-1 text-xs text-osso transition-colors hover:border-borda-forte"
                       >
                         {COLUMN_TYPES.map((type) => (
                           <option key={type} value={type}>
@@ -120,10 +130,10 @@ export function SchemaReview({ workbook, onChange }: SchemaReviewProps) {
                         ))}
                       </select>
                       {column.confidence < LOW_CONFIDENCE ? (
-                        <span className="ml-2 text-xs text-[#eb6834]">confira</span>
+                        <span className="utilitaria ml-2 text-alarme">confira</span>
                       ) : null}
                     </td>
-                    <td className="px-4 py-2 text-xs text-[#52514e]">
+                    <td className="px-4 py-2 font-mono text-[11px] text-osso-fraco">
                       {column.sampleValues.slice(0, 3).join(" · ") || "—"}
                     </td>
                   </tr>

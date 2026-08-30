@@ -9,6 +9,10 @@
  *
  * O valor digitado passa pelo mesmo `coerceValue` da Camada 1, então "1.234,50"
  * numa coluna numérica vira 1234.5, do mesmo jeito que viria da planilha.
+ *
+ * A tabela fica na bancada, e não em branco: branco na tela é o que vai para o
+ * PDF, e estas células não vão. Os números saem em mono, alinhados à direita —
+ * é a coluna que o usuário confere de cima a baixo procurando o valor errado.
  */
 
 import { useState } from "react";
@@ -30,7 +34,7 @@ export function DataEditor({ workbook, onChange }: DataEditorProps) {
   const table =
     workbook.tables.find((item) => item.schema.key === tableKey) ?? workbook.tables[0];
 
-  if (!table) return <p className="text-xs text-[#52514e]">Nenhuma tabela para editar.</p>;
+  if (!table) return <p className="text-xs text-osso-fraco">Nenhuma tabela para editar.</p>;
 
   function replaceTable(next: ParsedTable) {
     onChange({
@@ -64,12 +68,12 @@ export function DataEditor({ workbook, onChange }: DataEditorProps) {
   return (
     <div className="flex flex-col gap-3">
       {workbook.tables.length > 1 ? (
-        <label className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-[#898781]">Quadro</span>
+        <label className="flex flex-col gap-1.5">
+          <span className="utilitaria text-osso-fraco">Quadro</span>
           <select
             value={table.schema.key}
             onChange={(event) => setTableKey(event.target.value)}
-            className="w-full max-w-md rounded border border-[#e1e0d9] bg-white px-2 py-1.5 text-xs text-[#0b0b0b] focus:border-[#2a78d6] focus:outline-none"
+            className="w-full max-w-md rounded-[3px] border border-borda bg-bancada px-2 py-1.5 text-xs text-osso transition-colors hover:border-borda-forte"
           >
             {workbook.tables.map((item) => (
               <option key={item.schema.key} value={item.schema.key}>
@@ -80,24 +84,24 @@ export function DataEditor({ workbook, onChange }: DataEditorProps) {
         </label>
       ) : null}
 
-      <div className="max-h-96 overflow-auto rounded border border-[#e1e0d9]">
+      <div className="rolagem-bancada max-h-96 overflow-auto rounded-[3px] border border-borda">
         <table className="w-full border-collapse text-left text-xs">
-          <thead className="sticky top-0 z-10 bg-[#fcfcfb]">
+          <thead className="sticky top-0 z-10 bg-bancada">
             <tr>
               {table.schema.columns.map((column) => (
                 <th
                   key={column.key}
-                  className="border-b border-[#e1e0d9] px-2 py-1.5 font-medium text-[#52514e]"
+                  className="utilitaria border-b border-borda px-2 py-2 text-left font-normal text-osso-fraco"
                 >
                   {column.label}
                 </th>
               ))}
-              <th className="border-b border-[#e1e0d9] px-2 py-1.5" />
+              <th className="border-b border-borda px-2 py-2" />
             </tr>
           </thead>
           <tbody>
             {visiveis.map((row, rowIndex) => (
-              <tr key={rowIndex} className="border-b border-[#e1e0d9] last:border-0">
+              <tr key={rowIndex} className="border-b border-borda last:border-0">
                 {row.map((cell, columnIndex) => (
                   <td key={columnIndex} className="p-0">
                     <EditableCell
@@ -113,7 +117,7 @@ export function DataEditor({ workbook, onChange }: DataEditorProps) {
                     type="button"
                     onClick={() => removeRow(rowIndex)}
                     aria-label={`Remover linha ${rowIndex + 1}`}
-                    className="rounded px-1.5 py-0.5 text-[#898781] hover:text-[#e34948] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[#2a78d6]"
+                    className="rounded-[3px] px-1.5 py-0.5 text-osso-fraco transition-colors hover:text-alarme"
                   >
                     ✕
                   </button>
@@ -128,11 +132,11 @@ export function DataEditor({ workbook, onChange }: DataEditorProps) {
         <button
           type="button"
           onClick={addRow}
-          className="rounded border border-[#e1e0d9] px-3 py-1.5 text-xs text-[#52514e] hover:border-[#2a78d6] hover:text-[#2a78d6] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2a78d6]"
+          className="rounded-[3px] border border-borda px-3 py-1.5 text-xs text-osso-fraco transition-colors hover:border-borda-forte hover:text-osso"
         >
           Adicionar linha
         </button>
-        <p className="text-xs text-[#898781]">
+        <p className="text-xs text-osso-fraco">
           {table.rows.length > MAX_VISIBLE_ROWS
             ? `Mostrando as primeiras ${MAX_VISIBLE_ROWS} de ${table.rows.length} linhas.`
             : `${table.rows.length} linhas. As alterações valem para os gráficos e para o PDF.`}
@@ -163,8 +167,8 @@ function EditableCell({ value, numeric, label, onCommit }: EditableCellProps) {
       value={exibido}
       aria-label={label}
       inputMode={numeric ? "decimal" : "text"}
-      className={`w-full min-w-24 border border-transparent bg-transparent px-2 py-1 text-[#0b0b0b] focus:border-[#2a78d6] focus:outline-none ${
-        numeric ? "text-right tabular-nums" : ""
+      className={`w-full min-w-24 border border-transparent bg-transparent px-2 py-1 text-osso focus:border-osso-fraco focus:outline-none ${
+        numeric ? "text-right font-mono tabular-nums" : ""
       }`}
       onChange={(event) => setDraft(event.target.value)}
       onBlur={() => {

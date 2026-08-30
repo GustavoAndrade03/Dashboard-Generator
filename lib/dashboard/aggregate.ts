@@ -73,11 +73,16 @@ function formatBucketLabel(bucket: string, granularity: DateGranularity): string
   return `${day}/${month}/${year}`;
 }
 
-const TOTAL_ROW = /^\s*(sub)?total/i;
+const TOTAL_TEXT = /^\s*(sub)?total/i;
 
 /** "Subtotal", "TOTAL GERAL": o fechamento de um quadro, não uma categoria. */
 function isTotalRow(value: CellValue): boolean {
-  return typeof value === "string" && TOTAL_ROW.test(value);
+  return typeof value === "string" && TOTAL_TEXT.test(value);
+}
+
+/** Mesma regra aplicada ao rótulo de uma coluna. */
+function isTotalLabel(label: string): boolean {
+  return TOTAL_TEXT.test(label);
 }
 
 function cellToText(value: CellValue): string {
@@ -180,6 +185,12 @@ export function buildChartData(workbook: ParsedWorkbook, spec: ChartSpec): Chart
     };
   }
 
+  // Comparar quadros é outra pergunta: o eixo passa a ser as colunas e cada
+  // quadro vira uma série. Sai por aqui antes do caminho de um quadro só.
+  if (spec.compareTables && spec.compareTables.length > 0) {
+    return applyValueMode(buildComparison(workbook, spec, table), spec);
+  }
+
   const categoryIdx = spec.categoryKey ? columnIndex(table, spec.categoryKey) : -1;
   if (categoryIdx < 0) {
     return {
@@ -236,21 +247,38 @@ export function buildChartData(workbook: ParsedWorkbook, spec: ChartSpec): Chart
   const aggregation: Aggregation = valueColumns.length === 0 ? "count" : spec.aggregation;
 
   /**
-   * Um indicador só, várias unidades: o eixo teria uma categoria e a leitura
-   * ficaria toda na legenda. Nesse caso as unidades viram o eixo — é o gráfico
-   * que o usuário quis dizer ao pedir "déficit de vagas por unidade".
+   * Quem ocupa o eixo. O automático mantém os indicadores lá, exceto quando o
+   * recorte deixou um só: aí o gráfico teria uma categoria única e toda a
+   * leitura ficaria na legenda, então as unidades assumem o eixo.
    */
-  if (bucketOrder.length === 1 && series.length > 1) {
-    const entry = buckets.get(bucketOrder[0]);
-    const porUnidade: ChartDatum[] = series.map((item) => ({
-      label: item.label,
-      valor: aggregateValues(entry?.get(item.key) ?? [], aggregation),
-    }));
-    return {
-      categoryLabel: bucketOrder[0],
-      series: [{ key: "valor", label: bucketOrder[0] }],
-      rows: porUnidade.slice(0, spec.limit),
-    };
+  const colunasNoEixo =
+    spec.axis === "columns" ||
+    (spec.axis === undefined && bucketOrder.length === 1 && series.length > 1);
+
+  if (colunasNoEixo && series.length > 0 && bucketOrder.length > 0) {
+    const linhas: ChartDatum[] = series.map((coluna) => {
+      const datum: ChartDatum = { label: coluna.label };
+      bucketOrder.forEach((bucket, indice) => {
+        datum[`serie${indice}`] = aggregateValues(
+          buckets.get(bucket)?.get(coluna.key) ?? [],
+          aggregation,
+        );
+      });
+      return datum;
+    });
+
+    return applyValueMode(
+      {
+        // Com um indicador só, ele é que nomeia a série e o eixo.
+        categoryLabel: bucketOrder.length === 1 ? bucketOrder[0] : categorySchema.label,
+        series: bucketOrder.map((bucket, indice) => ({
+          key: `serie${indice}`,
+          label: isDate ? formatBucketLabel(bucket, granularity) : bucket,
+        })),
+        rows: linhas.slice(0, spec.limit),
+      },
+      spec,
+    );
   }
 
   const entries = bucketOrder.map((bucket) => {
@@ -274,9 +302,150 @@ export function buildChartData(workbook: ParsedWorkbook, spec: ChartSpec): Chart
     entries.sort((a, b) => Number(b.datum[primary] ?? 0) - Number(a.datum[primary] ?? 0));
   }
 
+  return applyValueMode(
+    {
+      categoryLabel: categorySchema.label,
+      series,
+      rows: entries.slice(0, spec.limit).map((entry) => entry.datum),
+    },
+    spec,
+  );
+}
+
+/** A coluna descritiva de um quadro: o rótulo da esquerda. */
+function descriptorIndex(table: ParsedTable): number {
+  return table.schema.columns.findIndex(
+    (column) => column.type !== "number" && column.type !== "empty",
+  );
+}
+
+/**
+ * Valor de um quadro para uma coluna, respeitando o recorte de indicadores.
+ *
+ * As colunas são casadas pelo **rótulo**, e não pela chave: "PAMC" de um quadro
+ * e "PAMC" de outro são colunas diferentes no schema, e é justamente essa
+ * correspondência que o usuário enxerga ao comparar dois quadros.
+ */
+function valueForColumn(table: ParsedTable, spec: ChartSpec, columnLabel: string): number | null {
+  const index = table.schema.columns.findIndex((column) => column.label === columnLabel);
+  if (index < 0) return null;
+
+  const descritor = descriptorIndex(table);
+  const recorte = spec.filter?.values;
+  const numeros: number[] = [];
+
+  for (const row of table.rows) {
+    if (!spec.includeTotalRows && descritor >= 0 && isTotalRow(row[descritor])) continue;
+    if (recorte && recorte.length > 0) {
+      if (descritor < 0) continue;
+      if (!recorte.includes(cellToText(row[descritor]))) continue;
+    }
+    const valor = row[index];
+    if (typeof valor === "number") numeros.push(valor);
+  }
+
+  return aggregateValues(numeros, spec.aggregation);
+}
+
+/**
+ * Comparação entre quadros: o eixo são as colunas escolhidas no quadro base e
+ * cada quadro comparado vira uma série.
+ */
+function buildComparison(workbook: ParsedWorkbook, spec: ChartSpec, base: ParsedTable): ChartData {
+  const quadros = [base];
+  for (const key of spec.compareTables ?? []) {
+    const outro = findTable(workbook, key);
+    if (outro && outro.schema.key !== base.schema.key) quadros.push(outro);
+  }
+
+  const eixo = spec.valueKeys
+    .map((key) => base.schema.columns.find((column) => column.key === key)?.label)
+    .filter((label): label is string => label !== undefined);
+
+  if (eixo.length === 0) {
+    return {
+      categoryLabel: "",
+      series: [],
+      rows: [],
+      error: "Escolha as colunas que quer comparar entre os quadros.",
+    };
+  }
+
+  const rows: ChartDatum[] = eixo.slice(0, spec.limit).map((columnLabel) => {
+    const datum: ChartDatum = { label: columnLabel };
+    quadros.forEach((quadro, indice) => {
+      datum[`quadro${indice}`] = valueForColumn(quadro, spec, columnLabel);
+    });
+    return datum;
+  });
+
   return {
-    categoryLabel: categorySchema.label,
-    series,
-    rows: entries.slice(0, spec.limit).map((entry) => entry.datum),
+    categoryLabel: "",
+    series: quadros.map((quadro, indice) => ({
+      key: `quadro${indice}`,
+      label: quadro.schema.label,
+    })),
+    rows,
   };
+}
+
+/**
+ * Converte para participação no conjunto mostrado.
+ *
+ * Qual é o conjunto depende do que varia no gráfico: com uma série, é o total
+ * das categorias; com várias, é a categoria. As duas leituras respondem à
+ * mesma pergunta ("quanto isto é do todo") aplicada ao eixo que existe.
+ *
+ * O sinal é preservado — um déficit continua negativo, em vez de virar uma
+ * participação positiva que não existe.
+ */
+function applyValueMode(data: ChartData, spec: ChartSpec): ChartData {
+  if (spec.valueMode !== "percent" || data.series.length === 0) return data;
+
+  /**
+   * Com uma série só, o conjunto é o gráfico inteiro: cada categoria vale uma
+   * fatia do total, e é isso que responde "quanto o PAMC é do total". Dividir
+   * pela própria série daria 100% em toda barra — verdade inútil.
+   */
+  if (data.series.length === 1) {
+    const chave = data.series[0].key;
+    const total = data.rows.reduce((soma, row) => {
+      const valor = row[chave];
+      return typeof valor === "number" ? soma + Math.abs(valor) : soma;
+    }, 0);
+
+    return {
+      ...data,
+      rows: data.rows.map((row) => {
+        const valor = row[chave];
+        return {
+          ...row,
+          [chave]: typeof valor === "number" && total > 0 ? (valor / total) * 100 : null,
+        };
+      }),
+    };
+  }
+
+  // Com várias séries, o conjunto é a categoria: cada série vale uma fatia
+  // daquela barra. As colunas de fechamento ficam fora do divisor — com
+  // "TOTAL" entre as séries ele sozinho vale metade da soma, e todas as
+  // porcentagens sairiam pela metade.
+  const base = data.series.filter((serie) => !isTotalLabel(serie.label));
+  const denominadores = base.length > 0 ? base : data.series;
+
+  const rows = data.rows.map((row) => {
+    const total = denominadores.reduce((soma, serie) => {
+      const valor = row[serie.key];
+      return typeof valor === "number" ? soma + Math.abs(valor) : soma;
+    }, 0);
+
+    const convertida: ChartDatum = { label: row.label };
+    for (const serie of data.series) {
+      const valor = row[serie.key];
+      convertida[serie.key] = typeof valor === "number" && total > 0 ? (valor / total) * 100 : null;
+    }
+    return convertida;
+  });
+
+  return { ...data, rows };
 }

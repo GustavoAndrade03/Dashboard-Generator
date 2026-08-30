@@ -11,13 +11,31 @@
  */
 
 import type { PaletteId } from "@/lib/dashboard/palettes";
+import type { SheetThemeId } from "@/lib/dashboard/themes";
 import type { ParsedWorkbook } from "@/lib/parsing/types";
 
-export type ChartType = "bar" | "line" | "area" | "pie" | "kpi" | "table";
+export type ChartType = "bar" | "hbar" | "line" | "area" | "pie" | "kpi" | "table";
 
 export type Aggregation = "sum" | "avg" | "count" | "min" | "max";
 
 export type DateGranularity = "day" | "month" | "year";
+
+/**
+ * Quem ocupa o eixo do gráfico.
+ *
+ * Num relatório em matriz há duas leituras da mesma tabela: comparar
+ * indicadores dentro de uma unidade ("rows") ou comparar unidades dentro de um
+ * indicador ("columns"). São perguntas diferentes sobre os mesmos números, e o
+ * usuário escolhe qual está fazendo.
+ *
+ * Ausente significa automático: indicadores no eixo, a menos que o recorte
+ * tenha deixado um só — aí as unidades assumem, senão o gráfico teria uma
+ * categoria única e toda a leitura ficaria na legenda.
+ */
+export type ChartAxis = "rows" | "columns";
+
+/** Valor absoluto ou participação no conjunto mostrado. */
+export type ValueMode = "absolute" | "percent";
 
 /**
  * Recorte de linhas do quadro.
@@ -56,6 +74,21 @@ export interface ChartSpec {
   includeTotalRows?: boolean;
   /** Mostra apenas alguns indicadores do quadro. Ausente = todos. */
   filter?: ChartFilter;
+  /** Quem vai para o eixo. Ausente = automático (ver ChartAxis). */
+  axis?: ChartAxis;
+  /**
+   * Empilha as séries em vez de pô-las lado a lado. Muda a pergunta que o
+   * gráfico responde: de "qual é maior" para "quanto cada uma é do todo".
+   */
+  stacked?: boolean;
+  /** Absoluto ou porcentagem do conjunto mostrado. Ausente = absoluto. */
+  valueMode?: ValueMode;
+  /**
+   * Outros quadros comparados no mesmo gráfico. Cada quadro vira uma série, e
+   * as colunas são casadas pelo rótulo — "PAMC" de um quadro com "PAMC" do
+   * outro —, porque a chave de coluna é local a cada tabela.
+   */
+  compareTables?: string[];
   /** Por que este gráfico foi sugerido — exibido ao adicioná-lo. */
   rationale: string;
   origin: "ai" | "heuristic" | "user";
@@ -80,6 +113,8 @@ export interface DashboardConfig {
   title: string;
   templateId: string;
   paletteId: PaletteId;
+  /** Papel e tinta da folha. Vive na config para não divergir do PDF. */
+  themeId: SheetThemeId;
   charts: PlacedChart[];
 }
 
@@ -91,6 +126,7 @@ export interface DashboardPayload {
 
 export const CHART_TYPE_LABELS: Record<ChartType, string> = {
   bar: "Barras",
+  hbar: "Barras deitadas",
   line: "Linha",
   area: "Área",
   pie: "Pizza",
@@ -101,6 +137,7 @@ export const CHART_TYPE_LABELS: Record<ChartType, string> = {
 /** Explicações sem jargão, para o seletor de tipo (CLAUDE.md, 11.9). */
 export const CHART_TYPE_HINTS: Record<ChartType, string> = {
   bar: "Comparar valores entre categorias",
+  hbar: "Comparar categorias de nome comprido, que não cabem embaixo da barra",
   line: "Acompanhar a evolução ao longo do tempo",
   area: "Evolução destacando o volume acumulado",
   pie: "Mostrar quanto cada parte representa do total",

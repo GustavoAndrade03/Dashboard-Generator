@@ -169,7 +169,7 @@ Se uma tarefa parecer exigir algo desta lista, sinalize antes de implementar —
 
 1. **Qualidade da inferência automática (Camada 1) é o maior risco do produto.** Planilhas muito bagunçadas podem quebrar a detecção de estrutura. Priorize robustez e tratamento de casos extremos nessa camada.
 2. **UX da correção pós-sugestão precisa ser simples.** Como a abordagem é "adivinha primeiro, corrige depois", a interface de correção/edição é tão importante quanto o motor de sugestão em si.
-3. **Fidelidade do PDF ao dashboard customizado.** Como o PDF é a própria página impressa, a fidelidade vem de graça em conteúdo — mas não em largura: o `ResponsiveContainer` do Recharts mede em JS, então a folha é fixada em 1031px (largura útil do A4 paisagem com margem de 12mm, arredondada para baixo) para que tela e papel tenham a mesma medida. Ao mexer no layout da folha, preserve isso — inclusive o arredondamento para baixo: um pixel a mais que a caixa da página faz o Chrome abrir uma folha em branco depois de cada folha cheia. Em contrapartida, margens, escala e "gráficos de segundo plano" agora dependem das configurações de impressão do usuário.
+3. **Fidelidade do PDF ao dashboard customizado.** Como o PDF é a própria página impressa, a fidelidade vem de graça em conteúdo — mas não em largura: o `ResponsiveContainer` do Recharts mede em JS, então a folha é fixada em 1031px (largura útil do A4 paisagem com margem de 12mm, arredondada para baixo) para que tela e papel tenham a mesma medida. Ao mexer no layout da folha, preserve isso — inclusive o arredondamento para baixo: um pixel a mais que a caixa da página faz o Chrome abrir uma folha em branco depois de cada folha cheia. Em contrapartida, margens, escala e "gráficos de segundo plano" agora dependem das configurações de impressão do usuário. E a margem de 12mm do `@page` **nunca é pintada** — nem pelo fundo da folha, nem pelo fundo da raiz do documento: medido no PDF, os dois cobrem no máximo a caixa de conteúdo. Enquanto a folha for clara isso é invisível; um papel escuro sairia emoldurado de branco.
 4. **Prompt da Camada 2 deve permanecer pequeno.** Nunca enviar a planilha inteira ou grandes volumes de dados brutos para a API de IA — apenas o schema resumido.
 
 ---
@@ -209,7 +209,7 @@ Escolhas já feitas, com o porquê. Não as reabra sem um motivo novo.
 | **scrypt do Node** para senhas | Evita bcrypt/argon2; a biblioteca padrão resolve, e são poucos usuários |
 | **Prisma 7 + `@prisma/adapter-pg`** | A v7 removeu o engine Rust: o driver adapter é obrigatório, não uma opção |
 | **Dados em coluna `Json`** | Nenhum free tier oferece storage de arquivo confiável. Para milhares de linhas, JSON no Postgres é suficiente e não adiciona infraestrutura |
-| **Tema claro único** | O PDF é a própria página impressa; um tema que segue a preferência do sistema faria o arquivo divergir do que está na tela |
+| **Tema claro único na folha** | O PDF é a própria página impressa; um tema que segue a preferência do sistema faria o arquivo divergir do que está na tela. Vale para o **documento**: a folha é clara em qualquer preferência. A moldura de edição em volta dela não é documento e segue outra regra (linha abaixo) |
 | **Fluxo todo em uma rota** | Os dados normalizados passam de alguns MB. Navegar entre rotas exigiria `sessionStorage` (que estoura) ou banco (que não deve ser obrigatório para usar a ferramenta) |
 | **`react-grid-layout`** no canvas | Arrastar, redimensionar, snap, compactação e teto de linhas prontos e testados. Escrever colisão e compactação à mão seriam centenas de linhas frágeis para o mesmo resultado. A v2 passa `nodeRef` ao `react-draggable`, então não esbarra no `findDOMNode` removido no React 19 |
 | **Paletas como reordenações das mesmas 8 matizes** | A ordem dos slots é o mecanismo de segurança para daltonismo, não enfeite. Cada paleta oferecida foi validada com o script do guia de visualização; ordenações inventadas à mão reprovaram |
@@ -218,10 +218,22 @@ Escolhas já feitas, com o porquê. Não as reabra sem um motivo novo.
 | **Linhas de fechamento fora dos gráficos por padrão** | Plotar "Subtotal" ao lado das parcelas que ele soma achata todas as barras. Fica de fora por padrão, com uma opção visível no painel para incluir |
 | **Proteção condicional a `AUTH_SECRET`** | Mantém o desenvolvimento local sem nenhum setup, e liga a exigência de login em qualquer ambiente que defina o segredo |
 | **Uma grade por folha, e não uma grade contínua** | Para o dashboard crescer além de uma página, a alternativa era uma grade única fatiada pela impressão. O Chrome não fragmenta de forma confiável conteúdo posicionado em absoluto (que é como o `react-grid-layout` posiciona tudo), e um gráfico cortado ao meio no PDF é justamente o defeito que não pode existir. Folhas separadas, cada uma no fluxo normal com `break-before: page`, tornam a paginação exata. O preço é não arrastar um gráfico de uma folha para a outra — daí o campo "Página" no painel |
+| **Tema da folha na config, não na preferência do sistema** | A decisão "tema claro único" proíbe a folha seguir `prefers-color-scheme`, porque o arquivo divergiria da tela. Um tema escolhido e guardado no `DashboardConfig` não tem esse problema: é o mesmo na tela, no PDF e para quem reabrir. A regra antiga não foi reaberta — continua valendo que o documento nunca reage ao sistema |
+| **Todos os temas de folha são claros** | Duas medidas, não gosto. (1) As oito matizes de série foram validadas contra cada superfície oferecida e passam; sobre papel escuro, quatro saem da banda de luminosidade e o violeta cai para 1,89:1 — um tema escuro exige um jogo de matizes próprio. (2) O Chrome não pinta a margem da página: medido no PDF, o fundo cobre 774x527pt (a caixa de conteúdo) numa folha de 842x595pt. Papel muito distante do branco sairia como um retângulo colorido dentro de uma moldura branca de 12mm |
+| **Eixo inclinado em vez de rótulo escondido** | O padrão do Recharts esconde o rótulo que não cabe, e o usuário via barras sem nome nenhum. Truncar mais também não resolvia: com doze categorias num cartão de meia folha sobram ~36px por rótulo, cerca de cinco letras. Inclinar 45° aproveita a altura e multiplica por 1,4 o texto que cabe. O cartão sabe seu tamanho pela **geometria da grade**, não por medição no navegador — medir daria respostas diferentes na tela e no papel |
+| **Preencher a folha reparte o resto, não divide igual** | Doze colunas entre cinco gráficos não dá número inteiro. Dividir igual e arredondar deixa uma coluna órfã na direita. Repartir dando o resto às primeiras peças fecha a soma exatamente em 12, que é a diferença entre "quase preenchido" e preenchido |
+| **Escala de banda nos três formatos cartesianos** | O Recharts posiciona o ponto de linha/área pela escala de ponto (o primeiro em cima do eixo Y, o último na borda) e a barra pela escala de banda (centrada na faixa). Medido no navegador, a mesma categoria caía em x=194 como barra e x=141 como ponto: trocar de formato deslocava o dado inteiro. `scale="band"` + `allowDuplicatedCategory={false}` alinha os três, e o desvio entre a marca e o rótulo dela caiu para 0px |
+| **Barras deitadas como sétimo formato, e não como opção da barra** | O seletor de formato mostra o desenho do resultado. Deitar a barra muda o desenho, então é um formato — e é a resposta para rótulo de categoria comprido, que em pé só cabe truncado ("POPULAÇÃO PRI…") |
+| **Comparação entre quadros por rótulo de coluna** | A chave de coluna é local a cada tabela, então casar por chave não compara nada e casar por posição casa errado — no relatório real as unidades aparecem em ordens diferentes entre quadros. O rótulo é o que o usuário vê e o que ele quer parear |
+| **Tinta do rótulo escolhida por contraste** | Dentro da barra empilhada não há superfície clara atrás do texto. Nenhuma tinta única serve: o branco reprova no amarelo (2,17) e no laranja (3,20), o grafite reprova no violeta (2,30). Escolher a melhor das duas matiz a matiz garante 4,48 no pior caso |
 | **Legenda da pizza casada pelo nome, não pelo índice** | O índice que o Recharts passa ao `formatter` da legenda não segue a ordem das fatias. Pareando por índice, cada número saía ao lado do rótulo de outra fatia — errado de um jeito que ninguém percebe olhando. A busca é pelo nome da linha |
 | **Ferramentas da planilha na barra de ações** | "Corrigir os dados" e "Conferir colunas" eram duas seções recolhidas no fim da página. Com o dashboard passando a ter várias folhas, o fim da página ficou a três telas de distância — ninguém acharia. Viraram botões da barra fixa, e o painel abre logo abaixo dela, sem custar altura quando fechado |
 | **"Mais opções" no painel do gráfico** | O painel tinha oito campos, dois deles exigindo saber o que é agregação ("Cálculo", "Incluir linhas de total"). São os que quase nunca mudam. Fechados, a primeira leitura do painel tem só decisões que o público-alvo entende |
 | **Folha de 700px, e não os 703px do papel** | A folha desenhada é o título mais a grade cheia, não a área útil inteira do A4. A sobra de 3px é a folga que garante que a folha seguinte comece numa página nova. Com a folha exatamente do tamanho do papel, o Chrome abria uma página em branco depois de cada folha cheia — foi o que aconteceu na primeira versão, com a margem entre folhas em estilo inline (que não zera na impressão) |
+| **Bancada escura em volta da folha branca** | O editor precisa dizer, sem texto nenhum, o que sai impresso. Com a folha branca sobre um plano quase branco, ela não lia como papel e a fronteira do que é documento ficava invisível. Escurecer só a moldura — que é toda `print:hidden` e nunca chega ao papel — torna a regra evidente: **o que é branco vai para o PDF**. A convenção é a de editor de documento (artboard clara sobre cromo escuro), não "modo escuro" |
+| **Interface sem matiz** | O anel de seleção era `#2a78d6` — que é exatamente a primeira cor de série da paleta padrão. A ferramenta pintava com a mesma tinta do dado, e num gráfico azul ninguém via o que estava selecionado. Agora o cromo é só grafite e osso: a única cor saturada da tela é o dado do usuário |
+| **Archivo (eixo `wdth`) + IBM Plex Mono** | O Geist é o padrão do scaffold do Next, e parecia isso. O Archivo foi desenhado para documento e formulário impressos, e é variável em largura: o contraste de display vem de esticar o mesmo desenho (`.expandida`), sem uma segunda família. O mono carrega o registro utilitário (`.utilitaria`) — número de página, contagem de linhas, tipo de coluna: o que a máquina leu se distingue do que a interface diz |
+| **Régua de páginas ao lado da pilha** | Com o dashboard passando de três telas de altura, faltava saber em que página se está e como chegar na outra. A régua marca a ordem real das páginas do PDF e leva até elas. Só existe com duas folhas ou mais: com uma só, "1" não informa nada. A posição das marcas é calculada de `SHEET_HEIGHT` + `SHEET_GAP`, e esse `SHEET_GAP` precisa continuar batendo com a classe `mb-6` da folha |
 
 ### 10.1 Limitações conhecidas da Camada 1
 
@@ -298,6 +310,7 @@ negociável e tem três implicações obrigatórias:
   - **Trocar os dados** — seletores com os nomes das colunas da planilha do
     usuário, exatamente como estão no arquivo dele.
   - **Recortar por indicador** — ver 11.3.1.
+  - **Comparar** — ver 11.3.2.
   - **Editar o título** — inline, clicando direto no título no canvas.
   - **Remover**.
 - Nunca exigir que o usuário abra um menu genérico e depois escolha a qual
@@ -326,12 +339,50 @@ edição de valores entra sozinho, em vez de ficar invisível. E se o indicador
 selecionado for renomeado ou apagado, o recorte cai fora e volta a valer
 "todos" — degradação visível, em vez de um gráfico misteriosamente vazio.
 
+### 11.3.2 Comparação
+
+Quatro controles, agrupados em "Comparar" no painel — fechados por padrão,
+porque o caminho simples não passa por eles.
+
+| Controle | O que muda |
+|---|---|
+| **No eixo** | Uma barra por linha (indicadores) ou por coluna (unidades). São perguntas diferentes sobre os mesmos números, e o automático só decide quando o recorte deixou um indicador só |
+| **Comparar com outro quadro** | Cada quadro vira uma série no mesmo gráfico. As colunas são casadas pelo **rótulo**, nunca pela posição: "PAMC" de um quadro com "PAMC" do outro, porque a chave de coluna é local a cada tabela |
+| **Empilhar as séries** | Uma barra dividida, em vez de barras lado a lado. Vale para barra, barra deitada e área; linha empilhada não se lê |
+| **Mostrar em porcentagem** | Participação no conjunto mostrado. Qual conjunto depende do que varia: com uma série é o total das categorias, com várias é a categoria. Dividir sempre pela categoria daria 100% em toda barra quando há uma série só |
+
+Colunas de fechamento ficam fora do divisor da porcentagem. Com "TOTAL" entre
+as séries ele sozinho vale metade da soma, e todas as porcentagens sairiam pela
+metade. Em compensação, a própria barra do TOTAL passa de 100% quando as
+unidades mostradas são um subconjunto — o número está certo, e é o que ele
+significa: o total vale mais do que as partes exibidas.
+
 ### 11.4 Adicionar gráficos
 
 - Botão claro para adicionar um gráfico.
 - Oferecer **primeiro** as sugestões restantes da Camada 2 — aquelas que não
   couberam no dashboard inicial —, como opções prontas com preview visual.
 - Só depois oferecer montar um gráfico do zero escolhendo colunas.
+
+### 11.4.1 Preencher a folha
+
+Um botão da barra redistribui os gráficos de **cada** folha para ocuparem a
+página inteira, sem sobra embaixo nem buraco no meio. Não é um template: o
+desenho sai da quantidade de gráficos que a folha tem, e não de uma lista fixa
+de vagas.
+
+- As faixas e as larguras são repartidas com o resto distribuído entre as
+  primeiras peças, então a soma fecha exatamente em 12 colunas e 12 linhas.
+  É isso que garante preenchimento sem sobra — e é o que os testes verificam,
+  célula a célula.
+- Os indicadores ganham uma faixa própria no topo, mais baixa. Um número só
+  esticado em meia página é desperdício de folha, pelo mesmo motivo que os
+  templates têm vagas pequenas.
+- Quantas faixas usar sai da proporção do cartão resultante, mirando algo mais
+  largo que alto, como a folha. No máximo três gráficos por faixa: abaixo de
+  quatro colunas o cartão não comporta eixo e rótulo.
+- É um passo do histórico, como qualquer outra ação — desfazer devolve o
+  layout anterior, e por isso não pede confirmação.
 
 ### 11.5 Templates de layout
 
@@ -343,7 +394,12 @@ selecionado for renomeado ou apagado, o recorte cai fora e volta a valer
 ### 11.6 Customização visual (escopo enxuto)
 
 - Paletas de cores pré-definidas e harmônicas. **Sem color picker livre** —
-  usuário leigo com liberdade total de cor produz dashboards ilegíveis.
+  usuário leigo com liberdade total de cor produz dashboards ilegíveis. Vale
+  igual para o papel: temas prontos, nunca um seletor de cor de fundo.
+- **Temas da folha** (papel e tinta do documento), em `lib/dashboard/themes.ts`.
+  Trocam `--paper`, `--surface` e as tintas por variáveis CSS declaradas na
+  própria folha, então toda classe utilitária já existente acompanha sem saber
+  que temas existem. O Recharts recebe os valores em JS, porque mede em JS.
 - Título geral do dashboard, editável inline.
 
 ### 11.7 Undo / Redo
@@ -388,6 +444,18 @@ selecionado for renomeado ou apagado, o recorte cai fora e volta a valer
 - Componentes React funcionais com TypeScript.
 - Gráficos com Recharts, encapsulados em um componente que recebe a
   configuração como prop — nunca lógica de dados dentro do componente visual.
+- **Barra, linha e área compartilham o eixo de categorias em escala de banda.**
+  Sem isso o Recharts põe o ponto da linha na borda da área de plotagem — o
+  primeiro em cima do eixo Y — enquanto a barra fica no centro da faixa, e a
+  mesma categoria cai em lugares diferentes conforme o formato.
+- **Nenhum rótulo de categoria some.** O `interval` do Recharts é
+  "preserveEnd" por padrão, o que **esconde** o rótulo que não cabe e deixa a
+  barra sem nome. O eixo usa `interval={0}` e, quando o espaço por categoria
+  fica curto, inclina 45° — o que multiplica por ~1,4 o texto que cabe na mesma
+  largura. A truncagem trabalha por orçamento em pixels, não por contagem de
+  caracteres: medido a 11px, um glifo maiúsculo ocupa 6,6px contra 5,2 de um
+  minúsculo, e cortar por número de caracteres estoura em rótulo TODO MAIÚSCULO
+  — que é a forma dos relatórios que o produto lê.
 - **Todo gráfico mostra os números, não só a forma.** Barras trazem o valor
   acima da barra; linha e área, sobre o ponto (com o ponto desenhado, que é a
   âncora do rótulo); a pizza põe o valor ao lado do nome na legenda; a tabela

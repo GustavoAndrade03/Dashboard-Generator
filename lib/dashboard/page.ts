@@ -56,6 +56,24 @@ export const GRID_ROW_HEIGHT = Math.floor(
   (GRID_AREA_HEIGHT - (GRID_ROWS - 1) * GRID_GAP) / GRID_ROWS,
 );
 
+/** Largura de uma coluna da grade, em pixels. */
+export const GRID_COL_WIDTH = (PAGE_WIDTH - (GRID_COLS - 1) * GRID_GAP) / GRID_COLS;
+
+/**
+ * Tamanho em pixels de um cartão que ocupa `w` x `h` da grade.
+ *
+ * Sai da geometria, e não de uma medição no navegador: o gráfico precisa
+ * decidir como desenhar o eixo antes de existir na tela, e uma medição daria
+ * respostas diferentes na tela e no papel — que é exatamente o que o WYSIWYG
+ * não pode ter.
+ */
+export function cardSize(w: number, h: number): { width: number; height: number } {
+  return {
+    width: w * GRID_COL_WIDTH + (w - 1) * GRID_GAP,
+    height: h * GRID_ROW_HEIGHT + (h - 1) * GRID_GAP,
+  };
+}
+
 /** Altura ocupada pela grade cheia. */
 export const GRID_HEIGHT = GRID_ROWS * GRID_ROW_HEIGHT + (GRID_ROWS - 1) * GRID_GAP;
 

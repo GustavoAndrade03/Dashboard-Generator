@@ -229,7 +229,8 @@ describe("recorte por indicador", () => {
       filter: { columnKey: indicador, values: ["DÉFICIT DE VAGAS"] },
     });
     expect(data.rows.map((row) => row.label)).toEqual(["PAMC", "CPMBV", "TOTAL"]);
-    expect(data.rows[0].valor).toBe(-693);
+    expect(data.series).toHaveLength(1);
+    expect(data.rows[0][data.series[0].key]).toBe(-693);
   });
 
   it("recorta também o KPI, e o indicador nomeia o número", () => {
@@ -279,5 +280,188 @@ describe("recorte por indicador", () => {
       table,
     );
     expect(normalizado.filter).toBeUndefined();
+  });
+});
+
+describe("eixo, empilhamento e porcentagem", () => {
+  const matriz: ParsedWorkbook = {
+    source: { kind: "xlsx-upload", label: "relatorio.xlsx", config: {} },
+    tables: [
+      buildParsedTable(
+        {
+          name: "Vagas",
+          cells: [
+            [null, "PAMC", "CPMBV", "TOTAL"],
+            ["DÉFICIT DE VAGAS", -693, -274, -1093],
+            ["VAGAS DISPONÍVEIS", 20, 30, 181],
+          ],
+          merges: [],
+        },
+        0,
+      ),
+    ],
+  };
+  const [indicador, pamc, cpmbv, total] = matriz.tables[0].schema.columns.map((c) => c.key);
+
+  const base: ChartSpec = {
+    id: "c1",
+    type: "bar",
+    title: "Teste",
+    tableKey: "t0",
+    categoryKey: indicador,
+    valueKeys: [pamc, cpmbv],
+    aggregation: "sum",
+    limit: 12,
+    rationale: "",
+    origin: "user",
+  };
+
+  it("por padrão põe os indicadores no eixo", () => {
+    const data = buildChartData(matriz, base);
+    expect(data.rows.map((row) => row.label)).toEqual(["VAGAS DISPONÍVEIS", "DÉFICIT DE VAGAS"]);
+    expect(data.series.map((serie) => serie.label)).toEqual(["PAMC", "CPMBV"]);
+  });
+
+  it("com o eixo nas colunas, indicadores viram séries", () => {
+    const data = buildChartData(matriz, { ...base, axis: "columns" });
+    expect(data.rows.map((row) => row.label)).toEqual(["PAMC", "CPMBV"]);
+    expect(data.series.map((serie) => serie.label)).toEqual([
+      "DÉFICIT DE VAGAS",
+      "VAGAS DISPONÍVEIS",
+    ]);
+    const linhaPamc = data.rows[0];
+    expect(linhaPamc[data.series[0].key]).toBe(-693);
+    expect(linhaPamc[data.series[1].key]).toBe(20);
+  });
+
+  it("o eixo escolhido vence o automático", () => {
+    // Um indicador só: o automático transporia, mas "rows" foi pedido.
+    const data = buildChartData(matriz, {
+      ...base,
+      axis: "rows",
+      filter: { columnKey: indicador, values: ["DÉFICIT DE VAGAS"] },
+    });
+    expect(data.rows.map((row) => row.label)).toEqual(["DÉFICIT DE VAGAS"]);
+  });
+
+  it("com uma coluna só, a porcentagem é a fatia no total do gráfico", () => {
+    const data = buildChartData(matriz, { ...base, valueKeys: [pamc], valueMode: "percent" });
+    const deficit = data.rows.find((row) => row.label === "DÉFICIT DE VAGAS")!;
+    const disponiveis = data.rows.find((row) => row.label === "VAGAS DISPONÍVEIS")!;
+    // -693 e 20 sobre 713: dividir pela própria série daria 100% em toda barra.
+    expect(deficit[pamc]).toBeCloseTo((-693 / 713) * 100, 3);
+    expect(disponiveis[pamc]).toBeCloseTo((20 / 713) * 100, 3);
+  });
+
+  it("em porcentagem com várias colunas, cada valor é a fatia na barra", () => {
+    const data = buildChartData(matriz, { ...base, valueMode: "percent" });
+    const deficit = data.rows.find((row) => row.label === "DÉFICIT DE VAGAS")!;
+    // 693 e 274 sobre 967: participacao pela magnitude, com o sinal mantido.
+    expect(deficit[pamc]).toBeCloseTo((-693 / 967) * 100, 3);
+    expect(deficit[cpmbv]).toBeCloseTo((-274 / 967) * 100, 3);
+  });
+
+  it("a coluna de total fica fora do divisor da porcentagem", () => {
+    const comTotal = buildChartData(matriz, {
+      ...base,
+      valueKeys: [pamc, cpmbv, total],
+      valueMode: "percent",
+    });
+    const deficit = comTotal.rows.find((row) => row.label === "DÉFICIT DE VAGAS")!;
+    // Se TOTAL entrasse na conta, o divisor dobraria e isto sairia pela metade.
+    expect(deficit[pamc]).toBeCloseTo((-693 / 967) * 100, 3);
+  });
+});
+
+describe("comparação entre quadros", () => {
+  const dois: ParsedWorkbook = {
+    source: { kind: "xlsx-upload", label: "relatorio.xlsx", config: {} },
+    tables: [
+      buildParsedTable(
+        {
+          name: "Vagas",
+          cells: [
+            [null, "PAMC", "CPMBV"],
+            ["DÉFICIT DE VAGAS", -693, -274],
+            ["VAGAS DISPONÍVEIS", 20, 30],
+          ],
+          merges: [],
+        },
+        0,
+      ),
+      buildParsedTable(
+        {
+          name: "Saúde",
+          // Mesmas unidades, em outra ordem: o casamento é pelo nome da coluna.
+          cells: [
+            [null, "CPMBV", "PAMC"],
+            ["DÉFICIT DE VAGAS", -140, -312],
+            ["OUTRO INDICADOR", 1, 2],
+          ],
+          merges: [],
+        },
+        1,
+      ),
+    ],
+  };
+  const [indicador, pamc, cpmbv] = dois.tables[0].schema.columns.map((c) => c.key);
+
+  const base: ChartSpec = {
+    id: "c1",
+    type: "bar",
+    title: "Teste",
+    tableKey: "t0",
+    categoryKey: indicador,
+    valueKeys: [pamc, cpmbv],
+    aggregation: "sum",
+    limit: 12,
+    filter: { columnKey: indicador, values: ["DÉFICIT DE VAGAS"] },
+    compareTables: ["t1"],
+    rationale: "",
+    origin: "user",
+  };
+
+  it("põe as colunas no eixo e cada quadro como série", () => {
+    const data = buildChartData(dois, base);
+    expect(data.rows.map((row) => row.label)).toEqual(["PAMC", "CPMBV"]);
+    expect(data.series).toHaveLength(2);
+  });
+
+  it("casa as colunas pelo nome, não pela posição", () => {
+    const data = buildChartData(dois, base);
+    const [quadroA, quadroB] = data.series.map((serie) => serie.key);
+    const linhaPamc = data.rows[0];
+    expect(linhaPamc[quadroA]).toBe(-693);
+    // No segundo quadro PAMC é a última coluna; por posição sairia -140.
+    expect(linhaPamc[quadroB]).toBe(-312);
+  });
+
+  it("devolve nulo quando o quadro comparado não tem aquela coluna", () => {
+    const semColuna = buildChartData(dois, { ...base, compareTables: ["t1"], valueKeys: [pamc] });
+    expect(semColuna.rows).toHaveLength(1);
+    expect(semColuna.rows[0].label).toBe("PAMC");
+  });
+
+  it("cobra as colunas antes de tentar comparar", () => {
+    const data = buildChartData(dois, { ...base, valueKeys: [] });
+    expect(data.error).toBeTruthy();
+  });
+
+  it("ignora o próprio quadro na lista de comparados", () => {
+    const resultado = normalizeSpec(
+      { ...base, compareTables: ["t0", "t1"] },
+      dois.tables[0],
+      dois.tables,
+    );
+    expect(resultado.compareTables).toEqual(["t1"]);
+  });
+
+  it("descarta o quadro comparado que sumiu da planilha", () => {
+    const resultado = normalizeSpec(
+      { ...base, compareTables: ["quadro-que-nao-existe"] },
+      dois.tables[0],
+      dois.tables,
+    );
+    expect(resultado.compareTables).toBeUndefined();
   });
 });

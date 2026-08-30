@@ -27,10 +27,10 @@ export function AddChartPanel({
   onCreateBlank,
 }: AddChartPanelProps) {
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       <div>
-        <h2 className="text-sm font-semibold text-[#0b0b0b]">Adicionar um gráfico</h2>
-        <p className="mt-1 text-xs text-[#52514e]">
+        <h2 className="expandida text-base font-semibold text-osso">Adicionar um gráfico</h2>
+        <p className="mt-1 text-xs leading-relaxed text-osso-fraco">
           Quando a folha enche, o gráfico novo abre a página seguinte.
         </p>
       </div>
@@ -40,7 +40,7 @@ export function AddChartPanel({
         então é aqui que os três gestos da folha são ensinados — sem tutorial,
         sem modal de boas-vindas (CLAUDE.md, 11.9: estados vazios convidam à ação).
       */}
-      <ul className="flex flex-col gap-1 rounded-md bg-white px-3 py-2 text-xs text-[#52514e]">
+      <ul className="flex flex-col gap-2 border-l border-borda pl-3 text-xs leading-snug text-osso-fraco">
         <li>Clique em um gráfico para editá-lo.</li>
         <li>Arraste para mudar de lugar.</li>
         <li>Puxe o canto de baixo à direita para redimensionar.</li>
@@ -48,13 +48,13 @@ export function AddChartPanel({
 
       {suggestions.length > 0 ? (
         <div className="flex flex-col gap-2">
-          <span className="text-xs font-medium text-[#898781]">Sugestões para esta planilha</span>
+          <span className="utilitaria text-osso-fraco">Sugestões para esta planilha</span>
           {suggestions.map((suggestion) => (
             <button
               key={suggestion.id}
               type="button"
               onClick={() => onAddSuggestion(suggestion)}
-              className="flex items-start gap-3 rounded-md border border-[#e1e0d9] p-2 text-left hover:border-[#2a78d6] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2a78d6]"
+              className="flex items-start gap-3 rounded-[3px] border border-borda p-2 text-left transition-colors hover:border-borda-forte hover:bg-bancada"
             >
               <ChartThumbnail
                 type={suggestion.type}
@@ -62,10 +62,10 @@ export function AddChartPanel({
                 className="mt-0.5 h-7 w-10 shrink-0"
               />
               <span className="min-w-0">
-                <span className="block truncate text-xs font-medium text-[#0b0b0b]">
+                <span className="block truncate text-xs font-medium text-osso">
                   {suggestion.title}
                 </span>
-                <span className="block text-[11px] text-[#898781]">
+                <span className="mt-0.5 block text-[11px] leading-snug text-osso-fraco">
                   {suggestion.rationale || CHART_TYPE_HINTS[suggestion.type]}
                 </span>
               </span>
@@ -73,7 +73,7 @@ export function AddChartPanel({
           ))}
         </div>
       ) : (
-        <p className="text-xs text-[#52514e]">
+        <p className="text-xs text-osso-fraco">
           Todas as sugestões automáticas já estão na folha.
         </p>
       )}
@@ -81,7 +81,7 @@ export function AddChartPanel({
       <button
         type="button"
         onClick={onCreateBlank}
-        className="rounded-md border border-[#e1e0d9] px-3 py-2 text-xs text-[#52514e] hover:border-[#2a78d6] hover:text-[#2a78d6] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2a78d6]"
+        className="rounded-[3px] border border-borda-forte px-3 py-2 text-xs text-osso transition-colors hover:bg-bancada"
       >
         Montar um gráfico escolhendo as colunas
       </button>

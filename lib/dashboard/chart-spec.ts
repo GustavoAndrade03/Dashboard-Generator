@@ -7,7 +7,12 @@
  */
 
 import { distinctCategoryValues } from "@/lib/dashboard/aggregate";
-import type { Aggregation, ChartFilter, ChartSpec, ChartType } from "@/lib/dashboard/types";
+import type {
+  Aggregation,
+  ChartFilter,
+  ChartSpec,
+  ChartType,
+} from "@/lib/dashboard/types";
 import type { ColumnSchema, ParsedTable } from "@/lib/parsing/types";
 
 /**
@@ -35,6 +40,16 @@ export function numberColumns(table: ParsedTable | undefined): ColumnSchema[] {
 /** Tipos que precisam de uma coluna de agrupamento para fazer sentido. */
 export function needsCategory(type: ChartType): boolean {
   return type !== "kpi" && type !== "table";
+}
+
+/** Tipos em que empilhar as séries faz sentido. Linha empilhada não se lê. */
+export function canStack(type: ChartType): boolean {
+  return type === "bar" || type === "hbar" || type === "area";
+}
+
+/** Tipos que aceitam os controles de comparação. */
+export function canCompare(type: ChartType): boolean {
+  return needsCategory(type);
 }
 
 function defaultLimit(type: ChartType, category: ColumnSchema | undefined): number {
@@ -68,7 +83,26 @@ function normalizeFilter(
  * numa combinação impossível — trocar para "Número" com três colunas
  * selecionadas, por exemplo. Preserva as escolhas que continuam válidas.
  */
-export function normalizeSpec(spec: ChartSpec, table: ParsedTable | undefined): ChartSpec {
+/**
+ * Mantém a lista de quadros comparados apontando para quadros que existem, e
+ * nunca para o próprio quadro base — que já é a primeira série.
+ */
+function normalizeCompare(
+  spec: ChartSpec,
+  tables: readonly ParsedTable[] | undefined,
+): string[] | undefined {
+  if (!canCompare(spec.type) || !spec.compareTables || !tables) return undefined;
+  const validos = spec.compareTables.filter(
+    (key) => key !== spec.tableKey && tables.some((item) => item.schema.key === key),
+  );
+  return validos.length > 0 ? validos : undefined;
+}
+
+export function normalizeSpec(
+  spec: ChartSpec,
+  table: ParsedTable | undefined,
+  tables?: readonly ParsedTable[],
+): ChartSpec {
   const categorias = categoryColumns(table);
   const numeros = numberColumns(table);
 
@@ -96,6 +130,10 @@ export function normalizeSpec(spec: ChartSpec, table: ParsedTable | undefined): 
     granularity: category?.type === "date" ? (spec.granularity ?? "month") : undefined,
     includeTotalRows: spec.includeTotalRows ?? false,
     filter: normalizeFilter(spec.filter, table),
+    axis: needsCategory(spec.type) ? spec.axis : undefined,
+    stacked: canStack(spec.type) ? spec.stacked : undefined,
+    valueMode: needsCategory(spec.type) ? spec.valueMode : undefined,
+    compareTables: normalizeCompare(spec, tables),
   };
 }
 
@@ -123,4 +161,12 @@ export function createChart(table: ParsedTable, id: string): ChartSpec {
 
 export const AGGREGATIONS: readonly Aggregation[] = ["sum", "avg", "count", "min", "max"];
 
-export const CHART_TYPES: readonly ChartType[] = ["bar", "line", "area", "pie", "kpi", "table"];
+export const CHART_TYPES: readonly ChartType[] = [
+  "bar",
+  "hbar",
+  "line",
+  "area",
+  "pie",
+  "kpi",
+  "table",
+];

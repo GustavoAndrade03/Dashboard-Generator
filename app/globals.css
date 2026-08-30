@@ -2,33 +2,150 @@
 @import "react-grid-layout/css/styles.css";
 
 /*
- * Tema único (claro). Não há variante escura de propósito: o PDF é gerado
- * imprimindo esta mesma página no Chromium, então um tema que muda conforme a
- * preferência do sistema faria o arquivo divergir do que o usuário viu.
- * Ver CLAUDE.md, seção 7.3.
+ * Duas superfícies, e a diferença entre elas é a regra que o produto inteiro
+ * ensina: o que é branco vai para o PDF, o resto é bancada.
+ *
+ * A folha continua sendo um tema claro fixo — a decisão da seção 10 ("tema
+ * claro único") vale para o DOCUMENTO, que não pode divergir do arquivo
+ * impresso, e ela não foi reaberta: nada aqui faz a folha seguir a preferência
+ * do sistema. A bancada é a moldura de edição, carrega `print:hidden` e nunca
+ * chega ao papel.
  */
 :root {
+  /* Bancada — a moldura de edição. */
+  --bancada: #211f1b;
+  --bancada-alta: #2b2823;
+  --borda: #3a352e;
+  --borda-forte: #4d473e;
+  --osso: #ece5d8;
+  --osso-fraco: #9e968a;
+  --alarme: #ff8a6b;
+
+  /*
+   * Folha — tinta e linhas do documento. Estes valores são os mesmos de
+   * `lib/dashboard/theme.ts`, que os entrega ao Recharts: mexer em um sem o
+   * outro faz o eixo do gráfico sair de uma cor e a tabela de outra.
+   */
   --surface: #fcfcfb;
-  --page-plane: #f9f9f7;
+  --paper: #ffffff;
   --ink-primary: #0b0b0b;
   --ink-secondary: #52514e;
   --ink-muted: #898781;
   --gridline: #e1e0d9;
   --baseline: #c3c2b7;
+
+  /* Raio: instrumento, não cartão. A folha não tem raio nenhum — papel tem
+     canto reto. */
+  --raio: 3px;
+  --raio-bloco: 6px;
+
+  /* Cor do anel de foco. Trocada dentro da folha, onde osso é invisível. */
+  --foco: var(--osso);
+
+  /* Trilho das miniaturas de formato de gráfico. Vive na bancada por padrão,
+     porque é só nos painéis que elas aparecem. */
+  --trilho-miniatura: var(--borda-forte);
 }
 
 @theme inline {
+  --color-bancada: var(--bancada);
+  --color-bancada-alta: var(--bancada-alta);
+  --color-borda: var(--borda);
+  --color-borda-forte: var(--borda-forte);
+  --color-osso: var(--osso);
+  --color-osso-fraco: var(--osso-fraco);
+  --color-alarme: var(--alarme);
+
+  --color-paper: var(--paper);
   --color-surface: var(--surface);
-  --color-page-plane: var(--page-plane);
   --color-ink: var(--ink-primary);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-ink-2: var(--ink-secondary);
+  --color-ink-3: var(--ink-muted);
+  --color-gridline: var(--gridline);
+  --color-baseline: var(--baseline);
+
+  --font-sans: var(--font-archivo);
+  --font-mono: var(--font-plex-mono);
 }
 
 body {
-  background: var(--page-plane);
+  background: var(--bancada);
+  color: var(--osso);
+  color-scheme: dark;
+  accent-color: var(--osso);
+}
+
+/*
+ * Faixa expandida do Archivo. O eixo de largura é o contraste tipográfico do
+ * produto: o mesmo desenho, esticado, separa a voz da interface do dado.
+ */
+.expandida {
+  font-stretch: 118%;
+  letter-spacing: -0.015em;
+}
+
+/* Registro utilitário: número de página, contagem, tipo de coluna. Tudo que a
+   máquina leu, e não o que a interface diz. */
+.utilitaria {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+/*
+ * Foco em um lugar só. `:where` não soma especificidade, então qualquer
+ * utilitário de outline continua vencendo onde ainda existir.
+ */
+:where(a, button, select, input, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--foco);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* Barras de rolagem dos painéis escuros — a padrão clara rasga a bancada. */
+.rolagem-bancada {
+  scrollbar-width: thin;
+  scrollbar-color: var(--borda-forte) transparent;
+}
+
+/*
+ * A folha. Única superfície branca da tela, e é isso que faz o usuário saber
+ * o que vai sair impresso sem ninguém explicar.
+ */
+.folha {
+  background: var(--paper);
   color: var(--ink-primary);
   color-scheme: light;
+  accent-color: var(--ink-primary);
+  --foco: var(--ink-primary);
+  --trilho-miniatura: var(--gridline);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.4),
+    0 12px 28px -12px rgb(0 0 0 / 0.55);
+}
+
+/*
+ * As folhas sobem uma vez, quando o dashboard aparece. É o único movimento
+ * orquestrado do produto: diz "isto aqui é um documento com páginas".
+ */
+@keyframes folha-entra {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+
+.folha {
+  animation: folha-entra 260ms cubic-bezier(0.22, 0.61, 0.36, 1) backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .folha,
+  .react-grid-layout,
+  .react-grid-item {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 /*
@@ -45,6 +162,8 @@ body {
   html,
   body {
     background: #ffffff;
+    color: var(--ink-primary);
+    color-scheme: light;
   }
 
   /*
@@ -58,29 +177,34 @@ body {
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+
+  /* A folha no papel não tem sombra nem entrada: é o papel. */
+  .folha {
+    animation: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Nenhum anel de foco vai para o arquivo. */
+  *:focus,
+  *:focus-visible {
+    outline: none !important;
+  }
 }
 
 /*
  * Grade do editor. O pacote traz um placeholder vermelho e alças invisíveis
- * por padrão; aqui eles viram parte da linguagem visual do produto.
+ * por padrão; aqui eles viram parte da linguagem visual do produto — grafite
+ * sobre papel, porque cor saturada na tela pertence ao dado do usuário.
  */
 .react-grid-item.react-grid-placeholder {
-  background: #2a78d6;
-  opacity: 0.12;
-  border-radius: 0.5rem;
+  background: var(--ink-primary);
+  opacity: 0.08;
+  border-radius: var(--raio-bloco);
 }
 
 .react-grid-item > .react-resizable-handle::after {
   border-right-color: var(--baseline);
   border-bottom-color: var(--baseline);
-}
-
-/* Quem pediu menos movimento não deve levar animação de arrasto. */
-@media (prefers-reduced-motion: reduce) {
-  .react-grid-layout,
-  .react-grid-item {
-    transition: none !important;
-  }
 }
 
 /*
@@ -95,9 +219,9 @@ body {
 }
 
 .recharts-wrapper:focus-visible {
-  outline: 2px solid #2a78d6;
+  outline: 2px solid var(--ink-primary);
   outline-offset: 2px;
-  border-radius: 0.25rem;
+  border-radius: 2px;
 }
 
 @media print {
@@ -120,11 +244,5 @@ body {
   .react-grid-item {
     box-shadow: none !important;
     --tw-ring-shadow: 0 0 #0000 !important;
-  }
-
-  .react-grid-item :focus,
-  .react-grid-item :focus-visible,
-  .recharts-wrapper:focus-visible {
-    outline: none !important;
   }
 }

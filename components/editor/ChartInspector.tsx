@@ -5,7 +5,8 @@
  *
  * Tudo aqui se aplica ao gráfico que está selecionado no canvas — o usuário
  * nunca abre um menu genérico para depois escolher a que gráfico a
- * configuração se aplica (CLAUDE.md, 11.3).
+ * configuração se aplica (CLAUDE.md, 11.3). Por isso o cabeçalho é o título do
+ * próprio gráfico, e não um rótulo genérico: o painel diz de quem ele é.
  */
 
 import { ChartThumbnail } from "@/components/charts/ChartThumbnail";
@@ -13,6 +14,8 @@ import { distinctCategoryValues } from "@/lib/dashboard/aggregate";
 import {
   AGGREGATIONS,
   CHART_TYPES,
+  canCompare,
+  canStack,
   categoryColumns,
   needsCategory,
   numberColumns,
@@ -23,6 +26,7 @@ import {
   CHART_TYPE_HINTS,
   CHART_TYPE_LABELS,
   type Aggregation,
+  type ChartAxis,
   type ChartSpec,
   type ChartType,
 } from "@/lib/dashboard/types";
@@ -54,6 +58,7 @@ export function ChartInspector({
   const table = workbook.tables.find((item) => item.schema.key === spec.tableKey);
   const categorias = categoryColumns(table);
   const numeros = numberColumns(table);
+  const outrosQuadros = workbook.tables.filter((item) => item.schema.key !== spec.tableKey);
 
   /**
    * A coluna do recorte é a de agrupamento quando existe; em KPI e tabela, que
@@ -80,6 +85,14 @@ export function ChartInspector({
     });
   }
 
+  function alternarQuadroComparado(key: string) {
+    const atuais = spec.compareTables ?? [];
+    const proximos = atuais.includes(key)
+      ? atuais.filter((item) => item !== key)
+      : [...atuais, key];
+    onChange({ ...spec, compareTables: proximos.length > 0 ? proximos : undefined });
+  }
+
   function toggleValor(key: string) {
     const selecionadas = spec.valueKeys.includes(key)
       ? spec.valueKeys.filter((item) => item !== key)
@@ -89,19 +102,29 @@ export function ChartInspector({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-start justify-between gap-2">
-        <h2 className="text-sm font-semibold text-[#0b0b0b]">Gráfico selecionado</h2>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="rounded border border-[#e1e0d9] px-2 py-1 text-xs text-[#52514e] hover:border-[#e34948] hover:text-[#e34948] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2a78d6]"
-        >
-          Remover
-        </button>
+      <div>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="utilitaria text-osso-fraco">Gráfico selecionado</p>
+            <h2 className="expandida mt-1 truncate text-base font-semibold text-osso">
+              {spec.title}
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onRemove}
+            className="shrink-0 rounded-[3px] border border-borda px-2 py-1 text-xs text-osso-fraco transition-colors hover:border-alarme hover:text-alarme"
+          >
+            Remover
+          </button>
+        </div>
+        <p className="mt-1.5 text-xs text-osso-fraco">
+          O título é editado no próprio gráfico: clique nele e digite.
+        </p>
       </div>
 
       <Campo rotulo="Formato">
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-3 gap-1.5">
           {CHART_TYPES.map((type) => (
             <BotaoFormato
               key={type}
@@ -141,7 +164,7 @@ export function ChartInspector({
 
       {filterColumn && valoresDisponiveis.length > 1 ? (
         <Campo rotulo="Mostrar apenas">
-          <label className="flex items-center gap-2 text-xs text-[#52514e]">
+          <label className={opcaoClass}>
             <input
               type="checkbox"
               checked={mostrarTodos}
@@ -158,9 +181,9 @@ export function ChartInspector({
           </label>
 
           {!mostrarTodos ? (
-            <div className="mt-1 flex max-h-44 flex-col gap-1 overflow-auto rounded border border-[#e1e0d9] p-2">
+            <div className="rolagem-bancada mt-1 flex max-h-44 flex-col gap-1 overflow-auto rounded-[3px] border border-borda p-2">
               {valoresDisponiveis.map((valor) => (
-                <label key={valor} className="flex items-center gap-2 text-xs text-[#52514e]">
+                <label key={valor} className={opcaoClass}>
                   <input
                     type="checkbox"
                     checked={selecionados.has(valor)}
@@ -206,10 +229,7 @@ export function ChartInspector({
         ) : (
           <div className="flex flex-col gap-1">
             {numeros.map((column) => (
-              <label
-                key={column.key}
-                className="flex items-center gap-2 text-xs text-[#52514e]"
-              >
+              <label key={column.key} className={opcaoClass}>
                 <input
                   type={spec.type === "kpi" ? "radio" : "checkbox"}
                   name={spec.type === "kpi" ? `valor-${spec.id}` : undefined}
@@ -220,12 +240,100 @@ export function ChartInspector({
                       : toggleValor(column.key)
                   }
                 />
-                {column.label}
+                <span className="truncate">{column.label}</span>
               </label>
             ))}
           </div>
         )}
       </Campo>
+
+      {canCompare(spec.type) ? (
+        <details className="rounded-[3px] border border-borda px-3 py-2">
+          <summary className="cursor-pointer text-xs text-osso-fraco transition-colors hover:text-osso">
+            Comparar
+          </summary>
+
+          <div className="mt-3 flex flex-col gap-4">
+            <Campo rotulo="No eixo">
+              <select
+                className={selectClass}
+                value={spec.axis ?? "auto"}
+                onChange={(event) =>
+                  onChange({
+                    ...spec,
+                    axis: event.target.value === "auto" ? undefined : (event.target.value as ChartAxis),
+                  })
+                }
+              >
+                <option value="auto">Automático</option>
+                <option value="rows">Uma barra por linha</option>
+                <option value="columns">Uma barra por coluna</option>
+              </select>
+              <span className={dicaClass}>
+                Trocar o eixo responde a outra pergunta com os mesmos números: comparar
+                indicadores dentro de uma coluna, ou colunas dentro de um indicador.
+              </span>
+            </Campo>
+
+            {outrosQuadros.length > 0 ? (
+              <Campo rotulo="Comparar com outro quadro">
+                <div className="flex max-h-40 flex-col gap-1 overflow-auto">
+                  {outrosQuadros.map((item) => (
+                    <label key={item.schema.key} className={opcaoClass}>
+                      <input
+                        type="checkbox"
+                        checked={(spec.compareTables ?? []).includes(item.schema.key)}
+                        onChange={() => alternarQuadroComparado(item.schema.key)}
+                      />
+                      <span className="truncate">{item.schema.label}</span>
+                    </label>
+                  ))}
+                </div>
+                <span className={dicaClass}>
+                  Cada quadro vira uma série. As colunas são casadas pelo nome — “PAMC” de um
+                  quadro com “PAMC” do outro.
+                </span>
+              </Campo>
+            ) : null}
+
+            {canStack(spec.type) ? (
+              <label className="flex items-start gap-2 text-xs text-osso">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={spec.stacked ?? false}
+                  onChange={(event) => onChange({ ...spec, stacked: event.target.checked })}
+                />
+                <span>
+                  Empilhar as séries
+                  <span className="mt-0.5 block text-[11px] leading-snug text-osso-fraco">
+                    Uma barra só, dividida — mostra quanto cada parte é do todo, em vez de qual
+                    é maior.
+                  </span>
+                </span>
+              </label>
+            ) : null}
+
+            <label className="flex items-start gap-2 text-xs text-osso">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={spec.valueMode === "percent"}
+                onChange={(event) =>
+                  onChange({ ...spec, valueMode: event.target.checked ? "percent" : undefined })
+                }
+              />
+              <span>
+                Mostrar em porcentagem
+                <span className="mt-0.5 block text-[11px] leading-snug text-osso-fraco">
+                  Com uma coluna escolhida, cada barra vira a fatia dela no total do gráfico.
+                  Com várias, cada série vira a fatia dela dentro da barra.
+                </span>
+              </span>
+            </label>
+          </div>
+        </details>
+      ) : null}
 
       <Campo rotulo="Página">
         <select
@@ -250,8 +358,8 @@ export function ChartInspector({
         primeira leitura do painel tenha só as decisões que o usuário entende.
       */}
       {spec.valueKeys.length > 0 || needsCategory(spec.type) ? (
-        <details className="rounded border border-[#e1e0d9] px-3 py-2">
-          <summary className="cursor-pointer text-xs font-medium text-[#52514e]">
+        <details className="rounded-[3px] border border-borda px-3 py-2">
+          <summary className="cursor-pointer text-xs text-osso-fraco transition-colors hover:text-osso">
             Mais opções
           </summary>
 
@@ -275,7 +383,7 @@ export function ChartInspector({
             ) : null}
 
             {needsCategory(spec.type) ? (
-              <label className="flex items-start gap-2 text-xs text-[#52514e]">
+              <label className="flex items-start gap-2 text-xs text-osso">
                 <input
                   type="checkbox"
                   className="mt-0.5"
@@ -286,7 +394,7 @@ export function ChartInspector({
                 />
                 <span>
                   Incluir linhas de total
-                  <span className="block text-[11px] text-[#898781]">
+                  <span className="mt-0.5 block text-[11px] leading-snug text-osso-fraco">
                     Linhas como “Subtotal” ficam de fora, senão achatam as demais barras.
                   </span>
                 </span>
@@ -295,23 +403,23 @@ export function ChartInspector({
           </div>
         </details>
       ) : null}
-
-      <p className="text-xs text-[#898781]">
-        O título é editado no próprio gráfico: clique nele e digite.
-      </p>
     </div>
   );
 }
 
 const selectClass =
-  "w-full rounded border border-[#e1e0d9] bg-white px-2 py-1.5 text-xs text-[#0b0b0b] focus:border-[#2a78d6] focus:outline-none";
+  "w-full rounded-[3px] border border-borda bg-bancada px-2 py-1.5 text-xs text-osso transition-colors hover:border-borda-forte";
 
-const avisoClass = "text-xs text-[#52514e]";
+const opcaoClass = "flex items-center gap-2 text-xs text-osso";
+
+const avisoClass = "text-xs leading-relaxed text-osso-fraco";
+
+const dicaClass = "text-[11px] leading-snug text-osso-fraco";
 
 function Campo({ rotulo, children }: { rotulo: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium text-[#898781]">{rotulo}</span>
+      <span className="utilitaria text-osso-fraco">{rotulo}</span>
       {children}
     </div>
   );
@@ -334,10 +442,10 @@ function BotaoFormato({
       onClick={onClick}
       aria-pressed={ativo}
       title={CHART_TYPE_HINTS[type]}
-      className={`flex flex-col items-center gap-1 rounded-md border p-2 text-[10px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#2a78d6] ${
+      className={`flex flex-col items-center gap-1 rounded-[3px] border p-2 text-[10px] transition-colors ${
         ativo
-          ? "border-[#2a78d6] bg-[#eef4fd] text-[#0b0b0b]"
-          : "border-[#e1e0d9] text-[#52514e] hover:border-[#c3c2b7]"
+          ? "border-osso bg-bancada text-osso"
+          : "border-borda text-osso-fraco hover:border-borda-forte hover:text-osso"
       }`}
     >
       <ChartThumbnail type={type} color={color} className="h-7 w-10" />

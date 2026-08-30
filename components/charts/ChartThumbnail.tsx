@@ -32,7 +32,12 @@ export function ChartThumbnail({ type, color, className }: ChartThumbnailProps) 
 }
 
 function Shape({ type, color }: { type: ChartType; color: string }) {
-  const trilho = "#e1e0d9";
+  /*
+   * O trilho acompanha a superfície em que a miniatura está desenhada: linha
+   * clara sobre a folha, linha de bancada sobre o painel escuro. Vem por
+   * variável para a miniatura não precisar saber onde foi parar.
+   */
+  const trilho = "var(--trilho-miniatura)";
 
   switch (type) {
     case "bar":
@@ -42,6 +47,15 @@ function Shape({ type, color }: { type: ChartType; color: string }) {
           <rect x="6" y="10" width="7" height="14" rx="2" fill={color} />
           <rect x="16.5" y="5" width="7" height="19" rx="2" fill={color} />
           <rect x="27" y="14" width="7" height="10" rx="2" fill={color} />
+        </>
+      );
+    case "hbar":
+      return (
+        <>
+          <line x1="6" y1="4" x2="6" y2="24" stroke={trilho} strokeWidth="1.5" />
+          <rect x="6" y="6" width="19" height="4.5" rx="2" fill={color} />
+          <rect x="6" y="12.5" width="28" height="4.5" rx="2" fill={color} />
+          <rect x="6" y="19" width="12" height="4.5" rx="2" fill={color} />
         </>
       );
     case "line":

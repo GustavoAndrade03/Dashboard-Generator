@@ -10,7 +10,7 @@
  * apenas um número e ficariam ridículos ocupando meia folha.
  */
 
-import { GRID_COLS, GRID_ROWS } from "@/lib/dashboard/page";
+import { GRID_COLS, GRID_GAP, GRID_ROWS, GRID_ROW_HEIGHT, PAGE_WIDTH } from "@/lib/dashboard/page";
 import type { ChartLayout, ChartSpec, PlacedChart } from "@/lib/dashboard/types";
 
 export interface TemplateSlot {
@@ -242,4 +242,121 @@ export function normalizePages(charts: PlacedChart[]): PlacedChart[] {
     const page = destino.get(chart.layout.page) ?? 0;
     return page === chart.layout.page ? chart : { ...chart, layout: { ...chart.layout, page } };
   });
+}
+
+/* ------------------------------------------------------------------ *
+ * Preencher a folha
+ *
+ * Reposiciona os gráficos de cada folha para que ocupem a página inteira, sem
+ * sobra embaixo nem buraco no meio. Diferente de um template, que é um desenho
+ * fixo: aqui o desenho sai da quantidade de gráficos que a folha tem.
+ * ------------------------------------------------------------------ */
+
+/** Proporção de cartão que se lê bem: mais largo que alto, como a folha. */
+const PROPORCAO_ALVO = 1.6;
+
+/** Abaixo de quatro colunas o cartão não comporta eixo e rótulo. */
+const MAX_POR_LINHA = 3;
+
+/** Altura, em linhas da grade, da faixa reservada aos indicadores. */
+const FAIXA_DE_INDICADORES = 3;
+
+/**
+ * Reparte `total` unidades entre `n` peças, dando o resto às primeiras.
+ * A soma é exatamente `total` — é isso que garante o preenchimento sem sobra.
+ */
+function reparte(total: number, n: number): number[] {
+  const base = Math.floor(total / n);
+  const resto = total % n;
+  return Array.from({ length: n }, (_, i) => base + (i < resto ? 1 : 0));
+}
+
+/** Em quantas faixas dividir `n` gráficos, escolhendo pela proporção do cartão. */
+function escolheLinhas(n: number, alturaEmLinhas: number): number {
+  const maximo = Math.max(1, Math.min(4, n, Math.floor(alturaEmLinhas / 2)));
+  const minimo = Math.min(maximo, Math.max(1, Math.ceil(n / MAX_POR_LINHA)));
+
+  let melhor = minimo;
+  let menorErro = Infinity;
+
+  for (let linhas = minimo; linhas <= maximo; linhas++) {
+    const porLinha = Math.ceil(n / linhas);
+    const larguraPx = (PAGE_WIDTH - (porLinha - 1) * GRID_GAP) / porLinha;
+    const linhasPorFaixa = alturaEmLinhas / linhas;
+    const alturaPx = linhasPorFaixa * GRID_ROW_HEIGHT + (linhasPorFaixa - 1) * GRID_GAP;
+    const erro = Math.abs(larguraPx / alturaPx - PROPORCAO_ALVO);
+    if (erro < menorErro) {
+      menorErro = erro;
+      melhor = linhas;
+    }
+  }
+  return melhor;
+}
+
+/** Ladrilha `itens` numa faixa que começa em `y0` e tem `altura` linhas. */
+function ladrilha(
+  itens: PlacedChart[],
+  y0: number,
+  altura: number,
+  page: number,
+): PlacedChart[] {
+  if (itens.length === 0) return [];
+
+  const linhas = escolheLinhas(itens.length, altura);
+  const porLinha = reparte(itens.length, linhas);
+  const alturas = reparte(altura, linhas);
+
+  const postos: PlacedChart[] = [];
+  let indice = 0;
+  let y = y0;
+
+  porLinha.forEach((quantos, faixa) => {
+    const larguras = reparte(GRID_COLS, quantos);
+    let x = 0;
+    for (let i = 0; i < quantos; i++) {
+      const chart = itens[indice++];
+      postos.push({
+        ...chart,
+        layout: { page, x, y, w: larguras[i], h: alturas[faixa] },
+      });
+      x += larguras[i];
+    }
+    y += alturas[faixa];
+  });
+
+  return postos;
+}
+
+/**
+ * Ocupa toda a folha, em todas as folhas.
+ *
+ * Os indicadores ganham uma faixa própria no topo, mais baixa: um número só
+ * esticado em meia página é desperdício de folha, e é o mesmo motivo pelo qual
+ * os templates têm vagas pequenas. Quando a folha só tem indicadores, eles
+ * dividem a página inteira — não há o que reservar.
+ */
+export function fillSheets(charts: PlacedChart[]): PlacedChart[] {
+  const total = pageCount(charts);
+  const resultado: PlacedChart[] = [];
+
+  for (let page = 0; page < total; page++) {
+    const daFolha = chartsOnPage(charts, page).sort(
+      (a, b) => a.layout.y - b.layout.y || a.layout.x - b.layout.x,
+    );
+    if (daFolha.length === 0) continue;
+
+    const indicadores = daFolha.filter((chart) => chart.type === "kpi");
+    const demais = daFolha.filter((chart) => chart.type !== "kpi");
+
+    if (indicadores.length > 0 && demais.length > 0) {
+      resultado.push(...ladrilha(indicadores, 0, FAIXA_DE_INDICADORES, page));
+      resultado.push(
+        ...ladrilha(demais, FAIXA_DE_INDICADORES, GRID_ROWS - FAIXA_DE_INDICADORES, page),
+      );
+    } else {
+      resultado.push(...ladrilha(daFolha, 0, GRID_ROWS, page));
+    }
+  }
+
+  return resultado;
 }

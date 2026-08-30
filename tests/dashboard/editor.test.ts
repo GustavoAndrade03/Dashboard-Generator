@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createChart, normalizeSpec } from "@/lib/dashboard/chart-spec";
 import {
   GRID_AREA_HEIGHT,
+  GRID_COLS,
   GRID_GAP,
   GRID_ROWS,
   GRID_ROW_HEIGHT,
@@ -10,10 +11,12 @@ import {
   SHEET_HEIGHT,
 } from "@/lib/dashboard/page";
 import { PALETTES, colorAt, getPalette } from "@/lib/dashboard/palettes";
+import { SHEET_THEMES, getSheetTheme, sheetVars } from "@/lib/dashboard/themes";
 import {
   TEMPLATES,
   applyTemplate,
   findFreeSlot,
+  fillSheets,
   findSlotOnPage,
   getTemplate,
   normalizePages,
@@ -278,5 +281,138 @@ describe("paletas", () => {
     const palette = PALETTES[0];
     expect(colorAt(palette, 0)).toBe(palette.colors[0]);
     expect(colorAt(palette, palette.colors.length)).toBe(palette.colors[0]);
+  });
+});
+
+describe("temas da folha", () => {
+  /** WCAG: contraste relativo entre duas cores hex. */
+  function contraste(a: string, b: string): number {
+    const luminancia = (hex: string) => {
+      const canal = [1, 3, 5]
+        .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+        .map((v) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
+      return 0.2126 * canal[0] + 0.7152 * canal[1] + 0.0722 * canal[2];
+    };
+    const [claro, escuro] = [luminancia(a), luminancia(b)].sort((x, y) => y - x);
+    return (claro + 0.05) / (escuro + 0.05);
+  }
+
+  it("todo tema tem papel claro", () => {
+    // Um papel escuro exige um jogo próprio de matizes de série: as oito
+    // atuais reprovam na banda de luminosidade sobre fundo escuro.
+    for (const theme of SHEET_THEMES) {
+      expect(contraste(theme.paper, "#ffffff"), theme.id).toBeLessThan(1.6);
+    }
+  });
+
+  it("o texto do documento passa em contraste sobre o papel do tema", () => {
+    for (const theme of SHEET_THEMES) {
+      expect(contraste(theme.ink.primary, theme.surface), `${theme.id} título`).toBeGreaterThan(7);
+      expect(
+        contraste(theme.ink.secondary, theme.surface),
+        `${theme.id} secundária`,
+      ).toBeGreaterThan(4.5);
+    }
+  });
+
+  it("a grade é recessiva, e a linha de base mais firme que ela", () => {
+    for (const theme of SHEET_THEMES) {
+      const grade = contraste(theme.ink.gridline, theme.surface);
+      const base = contraste(theme.ink.baseline, theme.surface);
+      expect(grade, `${theme.id} grade`).toBeLessThan(1.6);
+      expect(base, `${theme.id} base`).toBeGreaterThan(grade);
+    }
+  });
+
+  it("cai no tema padrão quando o id é desconhecido", () => {
+    expect(getSheetTheme("inexistente").id).toBe(SHEET_THEMES[0].id);
+    expect(getSheetTheme(undefined).id).toBe(SHEET_THEMES[0].id);
+  });
+
+  it("as variáveis da folha cobrem tudo que o documento pinta", () => {
+    const vars = sheetVars(SHEET_THEMES[1]) as Record<string, string>;
+    expect(Object.keys(vars).sort()).toEqual([
+      "--baseline",
+      "--gridline",
+      "--ink-muted",
+      "--ink-primary",
+      "--ink-secondary",
+      "--paper",
+      "--surface",
+    ]);
+  });
+});
+
+describe("preencher a folha", () => {
+  function naFolha(quantos: number, tipo: ChartSpec["type"] = "bar"): PlacedChart[] {
+    return Array.from({ length: quantos }, (_, i) => ({
+      ...spec({ id: `c${i}`, type: tipo }),
+      layout: { page: 0, x: (i % 2) * 6, y: Math.floor(i / 2) * 3, w: 6, h: 3 },
+    }));
+  }
+
+  /** A folha está cheia: sem sobreposição, sem buraco, e a grade toda ocupada. */
+  function conferePreenchimento(charts: PlacedChart[]) {
+    const celulas = new Map<string, number>();
+    for (const chart of charts) {
+      const { x, y, w, h } = chart.layout;
+      expect(x + w, `${chart.id} passa da largura`).toBeLessThanOrEqual(GRID_COLS);
+      expect(y + h, `${chart.id} passa da altura`).toBeLessThanOrEqual(GRID_ROWS);
+      for (let cy = y; cy < y + h; cy++) {
+        for (let cx = x; cx < x + w; cx++) {
+          const chave = `${cx},${cy}`;
+          celulas.set(chave, (celulas.get(chave) ?? 0) + 1);
+        }
+      }
+    }
+    for (const [chave, vezes] of celulas) {
+      expect(vezes, `célula ${chave} ocupada mais de uma vez`).toBe(1);
+    }
+    expect(celulas.size, "sobrou célula vazia na folha").toBe(GRID_COLS * GRID_ROWS);
+  }
+
+  for (const quantos of [1, 2, 3, 4, 5, 6, 7, 8, 9, 12]) {
+    it(`preenche a folha inteira com ${quantos} gráfico(s)`, () => {
+      conferePreenchimento(fillSheets(naFolha(quantos)));
+    });
+  }
+
+  it("preenche a folha com indicadores e gráficos juntos", () => {
+    const mistura = [...naFolha(2, "kpi"), ...naFolha(3).map((c) => ({ ...c, id: `g${c.id}` }))];
+    conferePreenchimento(fillSheets(mistura));
+  });
+
+  it("dá aos indicadores uma faixa mais baixa que a dos gráficos", () => {
+    const mistura = [...naFolha(2, "kpi"), ...naFolha(2).map((c) => ({ ...c, id: `g${c.id}` }))];
+    const resultado = fillSheets(mistura);
+    const numero = resultado.find((c) => c.type === "kpi")!;
+    const grafico = resultado.find((c) => c.type !== "kpi")!;
+    expect(numero.layout.y).toBe(0);
+    expect(numero.layout.h).toBeLessThan(grafico.layout.h);
+  });
+
+  it("preenche cada folha do dashboard, e não só a primeira", () => {
+    const duas = [
+      ...naFolha(3),
+      ...naFolha(2).map((c) => ({ ...c, id: `p1${c.id}`, layout: { ...c.layout, page: 1 } })),
+    ];
+    const resultado = fillSheets(duas);
+    conferePreenchimento(resultado.filter((c) => c.layout.page === 0));
+    conferePreenchimento(resultado.filter((c) => c.layout.page === 1));
+  });
+
+  it("não perde nem duplica gráfico", () => {
+    const entrada = naFolha(7);
+    const resultado = fillSheets(entrada);
+    expect(resultado.map((c) => c.id).sort()).toEqual(entrada.map((c) => c.id).sort());
+  });
+
+  it("respeita a ordem de leitura que a folha já tinha", () => {
+    const resultado = fillSheets(naFolha(6));
+    for (let i = 1; i < resultado.length; i++) {
+      const antes = resultado[i - 1].layout;
+      const agora = resultado[i].layout;
+      expect(antes.y < agora.y || (antes.y === agora.y && antes.x < agora.x)).toBe(true);
+    }
   });
 });

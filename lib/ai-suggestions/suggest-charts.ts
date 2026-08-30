@@ -37,12 +37,13 @@ const SYSTEM_PROMPT = [
   "- valueKeys deve conter apenas colunas de tipo number.",
   "- Para type 'kpi', use categoryKey null e exatamente uma coluna em valueKeys.",
   "- Prefira série temporal (line) quando houver coluna de data.",
+  "- Use 'hbar' (barras deitadas) quando os rótulos da categoria forem longos: eles não cabem embaixo de uma barra em pé.",
   "- Evite colunas de tipo identifier: elas não agregam informação visual.",
   "- Títulos e justificativas em português do Brasil, curtos e sem jargão técnico.",
 ].join("\n");
 
 const SuggestedChartSchema = z.object({
-  type: z.enum(["bar", "line", "area", "pie", "kpi", "table"]),
+  type: z.enum(["bar", "hbar", "line", "area", "pie", "kpi", "table"]),
   title: z.string(),
   tableKey: z.string(),
   categoryKey: z.string().nullable(),
