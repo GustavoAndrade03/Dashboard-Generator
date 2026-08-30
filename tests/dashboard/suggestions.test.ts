@@ -243,6 +243,35 @@ describe("recorte por indicador", () => {
     expect(data.kpi?.label).toBe("DÉFICIT DE VAGAS · PAMC");
   });
 
+  it("a tabela traz o indicador como primeira coluna", () => {
+    const data = buildChartData(matriz, { ...base, type: "table", valueKeys: [pamc, total] });
+
+    expect(data.categoryLabel).toBe("Indicador");
+    expect(data.rows[0].label).toBe("DÉFICIT DE VAGAS");
+    expect(data.rows[0][pamc]).toBe(-693);
+    // O indicador é a coluna descritiva, não uma série de valores.
+    expect(data.series.map((serie) => serie.key)).toEqual([pamc, total]);
+  });
+
+  it("não repete o indicador entre os valores quando nenhuma coluna foi escolhida", () => {
+    const data = buildChartData(matriz, { ...base, type: "table", valueKeys: [] });
+
+    expect(data.categoryLabel).toBe("Indicador");
+    expect(data.series.map((serie) => serie.key)).toEqual([pamc, cpmbv, total]);
+  });
+
+  it("a tabela também respeita o recorte por indicador", () => {
+    const data = buildChartData(matriz, {
+      ...base,
+      type: "table",
+      valueKeys: [total],
+      filter: { columnKey: indicador, values: ["CAPACIDADE GERAL"] },
+    });
+
+    expect(data.rows).toHaveLength(1);
+    expect(data.rows[0].label).toBe("CAPACIDADE GERAL");
+  });
+
   it("descarta o recorte quando o indicador some dos dados", () => {
     const table = matriz.tables[0];
     const normalizado = normalizeSpec(

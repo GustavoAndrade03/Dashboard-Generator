@@ -139,7 +139,7 @@ export function ChartInspector({
         </Campo>
       ) : null}
 
-      {filterColumn ? (
+      {filterColumn && valoresDisponiveis.length > 1 ? (
         <Campo rotulo="Mostrar apenas">
           <label className="flex items-center gap-2 text-xs text-[#52514e]">
             <input
@@ -227,41 +227,6 @@ export function ChartInspector({
         )}
       </Campo>
 
-      {spec.valueKeys.length > 0 ? (
-        <Campo rotulo="Cálculo">
-          <select
-            className={selectClass}
-            value={spec.aggregation}
-            onChange={(event) =>
-              onChange({ ...spec, aggregation: event.target.value as Aggregation })
-            }
-          >
-            {AGGREGATIONS.map((aggregation) => (
-              <option key={aggregation} value={aggregation}>
-                {AGGREGATION_LABELS[aggregation]}
-              </option>
-            ))}
-          </select>
-        </Campo>
-      ) : null}
-
-      {needsCategory(spec.type) ? (
-        <label className="flex items-start gap-2 text-xs text-[#52514e]">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={spec.includeTotalRows ?? false}
-            onChange={(event) => onChange({ ...spec, includeTotalRows: event.target.checked })}
-          />
-          <span>
-            Incluir linhas de total
-            <span className="block text-[11px] text-[#898781]">
-              Linhas como “Subtotal” ficam de fora, senão achatam as demais barras.
-            </span>
-          </span>
-        </label>
-      ) : null}
-
       <Campo rotulo="Página">
         <select
           className={selectClass}
@@ -278,6 +243,58 @@ export function ChartInspector({
           <option value={pageCount}>Nova página ({pageCount + 1})</option>
         </select>
       </Campo>
+
+      {/*
+        O que segue quase nunca precisa ser mexido, e são justamente os dois
+        controles que exigem saber o que é agregação. Ficam fechados para que a
+        primeira leitura do painel tenha só as decisões que o usuário entende.
+      */}
+      {spec.valueKeys.length > 0 || needsCategory(spec.type) ? (
+        <details className="rounded border border-[#e1e0d9] px-3 py-2">
+          <summary className="cursor-pointer text-xs font-medium text-[#52514e]">
+            Mais opções
+          </summary>
+
+          <div className="mt-3 flex flex-col gap-4">
+            {spec.valueKeys.length > 0 ? (
+              <Campo rotulo="Cálculo">
+                <select
+                  className={selectClass}
+                  value={spec.aggregation}
+                  onChange={(event) =>
+                    onChange({ ...spec, aggregation: event.target.value as Aggregation })
+                  }
+                >
+                  {AGGREGATIONS.map((aggregation) => (
+                    <option key={aggregation} value={aggregation}>
+                      {AGGREGATION_LABELS[aggregation]}
+                    </option>
+                  ))}
+                </select>
+              </Campo>
+            ) : null}
+
+            {needsCategory(spec.type) ? (
+              <label className="flex items-start gap-2 text-xs text-[#52514e]">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={spec.includeTotalRows ?? false}
+                  onChange={(event) =>
+                    onChange({ ...spec, includeTotalRows: event.target.checked })
+                  }
+                />
+                <span>
+                  Incluir linhas de total
+                  <span className="block text-[11px] text-[#898781]">
+                    Linhas como “Subtotal” ficam de fora, senão achatam as demais barras.
+                  </span>
+                </span>
+              </label>
+            ) : null}
+          </div>
+        </details>
+      ) : null}
 
       <p className="text-xs text-[#898781]">
         O título é editado no próprio gráfico: clique nele e digite.

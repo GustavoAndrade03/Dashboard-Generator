@@ -150,17 +150,31 @@ export function buildChartData(workbook: ParsedWorkbook, spec: ChartSpec): Chart
   }
 
   if (spec.type === "table") {
-    const columns =
+    /**
+     * A coluna descritiva do quadro — o rótulo da esquerda, "DÉFICIT DE VAGAS".
+     * Sem ela a tabela é uma parede de números sem dizer de que são, que é
+     * exatamente o que ela deveria resolver.
+     */
+    const descriptorIdx = table.schema.columns.findIndex(
+      (column) => column.type !== "number" && column.type !== "empty",
+    );
+    const escolhidas =
       valueColumns.length > 0
         ? valueColumns
         : table.schema.columns.map((schema, index) => ({ key: schema.key, index, schema }));
+    // Ela vira a primeira coluna; repeti-la entre os valores seria duplicata.
+    const columns = escolhidas.filter((column) => column.index !== descriptorIdx);
+
     const datums: ChartDatum[] = rows.slice(0, spec.limit).map((row, rowIndex) => {
-      const datum: ChartDatum = { label: String(rowIndex + 1) };
+      const datum: ChartDatum = {
+        label: descriptorIdx >= 0 ? cellToText(row[descriptorIdx]) : String(rowIndex + 1),
+      };
       for (const column of columns) datum[column.key] = row[column.index] ?? null;
       return datum;
     });
+
     return {
-      categoryLabel: "",
+      categoryLabel: descriptorIdx >= 0 ? table.schema.columns[descriptorIdx].label : "",
       series: columns.map((column) => ({ key: column.key, label: column.schema.label })),
       rows: datums,
     };

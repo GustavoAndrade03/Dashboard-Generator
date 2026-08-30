@@ -31,10 +31,20 @@ export function AddChartPanel({
       <div>
         <h2 className="text-sm font-semibold text-[#0b0b0b]">Adicionar um gráfico</h2>
         <p className="mt-1 text-xs text-[#52514e]">
-          Clique em um gráfico da folha para editá-lo. Quando a folha enche, o
-          gráfico novo abre a página seguinte.
+          Quando a folha enche, o gráfico novo abre a página seguinte.
         </p>
       </div>
+
+      {/*
+        O estado de repouso do painel é onde o usuário perdido olha primeiro,
+        então é aqui que os três gestos da folha são ensinados — sem tutorial,
+        sem modal de boas-vindas (CLAUDE.md, 11.9: estados vazios convidam à ação).
+      */}
+      <ul className="flex flex-col gap-1 rounded-md bg-white px-3 py-2 text-xs text-[#52514e]">
+        <li>Clique em um gráfico para editá-lo.</li>
+        <li>Arraste para mudar de lugar.</li>
+        <li>Puxe o canto de baixo à direita para redimensionar.</li>
+      </ul>
 
       {suggestions.length > 0 ? (
         <div className="flex flex-col gap-2">

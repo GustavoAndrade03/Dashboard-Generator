@@ -218,6 +218,9 @@ Escolhas já feitas, com o porquê. Não as reabra sem um motivo novo.
 | **Linhas de fechamento fora dos gráficos por padrão** | Plotar "Subtotal" ao lado das parcelas que ele soma achata todas as barras. Fica de fora por padrão, com uma opção visível no painel para incluir |
 | **Proteção condicional a `AUTH_SECRET`** | Mantém o desenvolvimento local sem nenhum setup, e liga a exigência de login em qualquer ambiente que defina o segredo |
 | **Uma grade por folha, e não uma grade contínua** | Para o dashboard crescer além de uma página, a alternativa era uma grade única fatiada pela impressão. O Chrome não fragmenta de forma confiável conteúdo posicionado em absoluto (que é como o `react-grid-layout` posiciona tudo), e um gráfico cortado ao meio no PDF é justamente o defeito que não pode existir. Folhas separadas, cada uma no fluxo normal com `break-before: page`, tornam a paginação exata. O preço é não arrastar um gráfico de uma folha para a outra — daí o campo "Página" no painel |
+| **Legenda da pizza casada pelo nome, não pelo índice** | O índice que o Recharts passa ao `formatter` da legenda não segue a ordem das fatias. Pareando por índice, cada número saía ao lado do rótulo de outra fatia — errado de um jeito que ninguém percebe olhando. A busca é pelo nome da linha |
+| **Ferramentas da planilha na barra de ações** | "Corrigir os dados" e "Conferir colunas" eram duas seções recolhidas no fim da página. Com o dashboard passando a ter várias folhas, o fim da página ficou a três telas de distância — ninguém acharia. Viraram botões da barra fixa, e o painel abre logo abaixo dela, sem custar altura quando fechado |
+| **"Mais opções" no painel do gráfico** | O painel tinha oito campos, dois deles exigindo saber o que é agregação ("Cálculo", "Incluir linhas de total"). São os que quase nunca mudam. Fechados, a primeira leitura do painel tem só decisões que o público-alvo entende |
 | **Folha de 700px, e não os 703px do papel** | A folha desenhada é o título mais a grade cheia, não a área útil inteira do A4. A sobra de 3px é a folga que garante que a folha seguinte comece numa página nova. Com a folha exatamente do tamanho do papel, o Chrome abria uma página em branco depois de cada folha cheia — foi o que aconteceu na primeira versão, com a margem entre folhas em estilo inline (que não zera na impressão) |
 
 ### 10.1 Limitações conhecidas da Camada 1
@@ -363,11 +366,20 @@ selecionado for renomeado ou apagado, o recorte cai fora e volta a valer
 
 - **Vocabulário do usuário, não do sistema.** "Colunas da sua planilha", não
   "campos do schema". "Trocar tipo de gráfico", não "alterar chart type".
+- **Aviso técnico não vai para a interface.** Nome de variável de ambiente,
+  "schema", "heurística", "IA": o usuário não pode agir sobre nada disso. Se a
+  aplicação seguiu por um caminho alternativo e o resultado está lá, ele não
+  vira alerta — vai para o log do servidor. Alerta só quando existe algo a
+  fazer.
 - **Voz ativa e consistente.** O botão que diz "Gerar PDF" produz uma mensagem
   que diz "PDF gerado". A mesma ação mantém o mesmo nome em toda a interface.
 - **Estados vazios são convites à ação**, não avisos. Um canvas sem gráficos
   diz o que fazer em seguida.
-- **Erros explicam causa e solução**, sem se desculpar e sem vagueza.
+- **Erros explicam causa e solução**, sem se desculpar e sem vagueza, e
+  aparecem perto do que os provocou — não no topo de uma página que pode ter
+  várias folhas de altura.
+- **Toda ação tem retorno visível.** Um botão que só revela um painel já
+  visível parece quebrado; nesse caso ele move o foco, que é o retorno.
 - Interface em português (pt-BR), em sentence case, sem jargão técnico em
   nenhuma label visível.
 
@@ -376,6 +388,12 @@ selecionado for renomeado ou apagado, o recorte cai fora e volta a valer
 - Componentes React funcionais com TypeScript.
 - Gráficos com Recharts, encapsulados em um componente que recebe a
   configuração como prop — nunca lógica de dados dentro do componente visual.
+- **Todo gráfico mostra os números, não só a forma.** Barras trazem o valor
+  acima da barra; linha e área, sobre o ponto (com o ponto desenhado, que é a
+  âncora do rótulo); a pizza põe o valor ao lado do nome na legenda; a tabela
+  abre com a coluna do indicador à esquerda dos números. O rótulo sobre o dado
+  usa formato curto ("1,3 mil") — o valor por extenso não cabe num cartão de
+  meia folha; a legenda e a tabela, que têm largura, usam o número cheio.
 - O estado do dashboard (gráficos, posições, template, paleta, títulos) é um
   **objeto serializável único**, persistível no banco e consumível pela
   impressão sem transformação adicional.

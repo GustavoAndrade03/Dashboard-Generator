@@ -20,6 +20,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  LabelList,
   Legend,
   Line,
   LineChart,
@@ -44,6 +45,25 @@ function shortenTick(value: unknown): string {
   const texto = String(value ?? "");
   return texto.length > MAX_TICK_CHARS ? `${texto.slice(0, MAX_TICK_CHARS - 1)}…` : texto;
 }
+
+/**
+ * Rótulo de valor desenhado sobre a barra ou o ponto.
+ *
+ * Vai em formato curto ("1,3 mil"): o número fica ao lado do dado, onde o
+ * usuário está olhando, sem precisar percorrer o eixo — e sem ocupar a largura
+ * que o valor por extenso ocuparia num cartão de meia folha.
+ */
+function valueLabel(value: string | number | boolean | null | undefined): string {
+  return typeof value === "number" ? formatCompact(value) : "";
+}
+
+const dataLabelProps = {
+  position: "top",
+  offset: 6,
+  fill: INK.secondary,
+  fontSize: 10,
+  formatter: valueLabel,
+} as const;
 
 const axisProps = {
   stroke: INK.baseline,
@@ -158,6 +178,14 @@ function ChartBody({ spec, data, palette }: BodyProps) {
             wrapperStyle={{ fontSize: 11, color: INK.secondary }}
             iconType="circle"
             iconSize={8}
+            // Casa pelo nome, e não pelo índice: a legenda do Recharts não
+            // segue a ordem das fatias, e por índice cada número saía ao lado
+            // do rótulo de outra fatia.
+            formatter={(name: string) => {
+              const linha = data.rows.find((row) => String(row.label) === name);
+              const valor = linha?.[key];
+              return typeof valor === "number" ? `${name} · ${formatNumber(valor)}` : name;
+            }}
           />
           {tooltip}
         </PieChart>
@@ -172,7 +200,8 @@ function ChartBody({ spec, data, palette }: BodyProps) {
       <YAxis {...axisProps} tickFormatter={formatCompact} width={48} />
     </>
   );
-  const margin = { top: 4, right: 8, bottom: 0, left: 0 };
+  // Espaço no topo para o rótulo do ponto mais alto não sair cortado.
+  const margin = { top: 16, right: 8, bottom: 0, left: 0 };
 
   if (spec.type === "line") {
     return (
@@ -188,9 +217,12 @@ function ChartBody({ spec, data, palette }: BodyProps) {
               name={series.label}
               stroke={colorAt(palette, index)}
               strokeWidth={2}
-              dot={false}
+              // O ponto ancora o número: sem ele o rótulo flutua sobre a curva.
+              dot={{ r: 2.5, fill: colorAt(palette, index), strokeWidth: 0 }}
               isAnimationActive={false}
-            />
+            >
+              <LabelList dataKey={series.key} {...dataLabelProps} />
+            </Line>
           ))}
           {legend}
           {tooltip}
@@ -215,8 +247,11 @@ function ChartBody({ spec, data, palette }: BodyProps) {
               strokeWidth={2}
               fill={colorAt(palette, index)}
               fillOpacity={0.15}
+              dot={{ r: 2.5, fill: colorAt(palette, index), strokeWidth: 0 }}
               isAnimationActive={false}
-            />
+            >
+              <LabelList dataKey={series.key} {...dataLabelProps} />
+            </Area>
           ))}
           {legend}
           {tooltip}
@@ -239,7 +274,9 @@ function ChartBody({ spec, data, palette }: BodyProps) {
             // Ponta arredondada só no topo, ancorada na linha de base.
             radius={[4, 4, 0, 0]}
             isAnimationActive={false}
-          />
+          >
+            <LabelList dataKey={series.key} {...dataLabelProps} />
+          </Bar>
         ))}
         {legend}
         {tooltip}
@@ -248,14 +285,27 @@ function ChartBody({ spec, data, palette }: BodyProps) {
   );
 }
 
+/**
+ * A primeira coluna é o rótulo da linha — "DÉFICIT DE VAGAS", "Presos
+ * Provisórios" —, e não um número de ordem. Sem ela a tabela era uma parede de
+ * valores sem dizer de que eram.
+ *
+ * Números alinham à direita e em largura fixa de dígito, que é o que permite
+ * comparar ordens de grandeza percorrendo a coluna com o olho.
+ */
 function DataTable({ data }: { data: ChartData }) {
+  const temDescritor = data.categoryLabel !== "";
+
   return (
     <div className="h-full overflow-auto">
       <table className="w-full text-left text-xs">
         <thead className="sticky top-0 bg-[#fcfcfb]">
           <tr className="border-b border-[#e1e0d9]">
+            {temDescritor ? (
+              <th className="px-2 py-1 font-medium text-[#52514e]">{data.categoryLabel}</th>
+            ) : null}
             {data.series.map((series) => (
-              <th key={series.key} className="px-2 py-1 font-medium text-[#52514e]">
+              <th key={series.key} className="px-2 py-1 text-right font-medium text-[#52514e]">
                 {series.label}
               </th>
             ))}
@@ -264,13 +314,22 @@ function DataTable({ data }: { data: ChartData }) {
         <tbody>
           {data.rows.map((row, index) => (
             <tr key={index} className="border-b border-[#e1e0d9] last:border-0">
-              {data.series.map((series) => (
-                <td key={series.key} className="px-2 py-1 text-[#0b0b0b]">
-                  {typeof row[series.key] === "number"
-                    ? formatNumber(row[series.key] as number)
-                    : String(row[series.key] ?? "—")}
-                </td>
-              ))}
+              {temDescritor ? (
+                <td className="px-2 py-1 font-medium text-[#0b0b0b]">{String(row.label)}</td>
+              ) : null}
+              {data.series.map((series) => {
+                const valor = row[series.key];
+                return (
+                  <td
+                    key={series.key}
+                    className={`px-2 py-1 text-[#0b0b0b] ${
+                      typeof valor === "number" ? "text-right tabular-nums" : ""
+                    }`}
+                  >
+                    {typeof valor === "number" ? formatNumber(valor) : String(valor ?? "—")}
+                  </td>
+                );
+              })}
             </tr>
           ))}
         </tbody>
